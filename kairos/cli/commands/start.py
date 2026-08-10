@@ -55,7 +55,7 @@ def start(
     password_stdin: bool = typer.Option(
         False, "--password-stdin", help="Read the keystore password from stdin (else $HBOT_PASSWORD or a prompt)."),
     auto_set_permissions: Optional[str] = typer.Option(
-        None, "--auto-set-permissions", help="user:group to chown conf/data/logs (Docker)."),
+        None, "--auto-set-permissions", help="user:group to chown conf/data/logs (container)."),
     timeout: float = typer.Option(120.0, "--timeout", help="Seconds to wait for the bot to start."),
     as_json: bool = json_option(),
 ) -> None:
@@ -64,7 +64,7 @@ def start(
     One bot per install — fails if one is already running. The type is detected from the conf dir
     holding the file; a --v1-strategy/--v2-script/--controller flag is only needed when a legacy name
     exists under more than one type. By default the bot runs detached (the command returns); pass
-    --foreground to run it in the foreground, e.g. as a Docker container's main process."""
+    --foreground to run it in the foreground, e.g. as a Podman container's main process."""
     record = launch(file=file, v1=v1, v2=v2, controller=controller, replace=replace,
                     foreground=foreground, password_stdin=password_stdin,
                     auto_set_permissions=auto_set_permissions, timeout=timeout)
@@ -161,9 +161,9 @@ def launch(*, file: Optional[str], v1: bool = False, v2: bool = False, controlle
 
     if foreground:
         # Replace this process with the engine so the bot runs in the FOREGROUND — the right shape for a
-        # container's main process: the bot IS PID 1, so `docker stop` -> SIGTERM -> the engine's graceful
+        # container's main process: the bot IS PID 1, so `podman stop` -> SIGTERM -> the engine's graceful
         # shutdown (cancels orders). os.exec* keeps the same PID, so the pid we record is the engine's;
-        # stdout/stderr stay attached to the terminal/container (visible via `docker logs`).
+        # stdout/stderr stay attached to the terminal/container (visible via `podman logs`).
         bot.write_pid(os.getpid())
         bot.update_meta(pid=os.getpid())
         os.chdir(prefix_path())

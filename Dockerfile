@@ -73,14 +73,14 @@ WORKDIR /home/kairos
 COPY --from=builder /opt/conda/ /opt/conda/
 COPY --from=builder /home/ /home/
 
-# Put the kairos-2 env on PATH so non-login shells (e.g. `docker exec … hbot`) find the env's python
+# Put the kairos-2 env on PATH so non-login shells (e.g. `podman exec … hbot`) find the env's python
 # + console scripts without `conda activate`, and expose the `hbot` CLI there (mirrors make install).
-# This lets the image run as a single-bot container: `docker run … hbot start <config>`,
-# `docker exec … hbot status`.
-ENV PATH=/opt/conda/envs/kairos/bin:$PATH
-RUN ln -sf /home/kairos/bin/hbot /opt/conda/envs/kairos/bin/hbot
+# This lets the image run as a single-bot container: `podman run … hbot start <config>`,
+# `podman exec … hbot status`.
+ENV PATH=/opt/conda/envs/kairos-2/bin:$PATH
+RUN ln -sf /home/kairos/bin/hbot /opt/conda/envs/kairos-2/bin/hbot
 
-# Setting bash as default shell because we have .bashrc with customized PATH (setting SHELL affects RUN, CMD and ENTRYPOINT, but not manual commands e.g. `docker run image COMMAND`!)
+# Setting bash as default shell because we have .bashrc with customized PATH (setting SHELL affects RUN, CMD and ENTRYPOINT, but not manual commands e.g. `podman run image COMMAND`!)
 SHELL [ "/bin/bash", "-lc" ]
 
 # Set the default command to run when starting the container

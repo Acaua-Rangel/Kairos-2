@@ -81,10 +81,10 @@ CONDA_ENV=Kairos-2
     * Open your terminal.
     * Run the following commands to create a symbolic link to work around a known Conda environment detection issue:
         ```bash
-        mkdir -p ~/anaconda3/envs/kairos/envs
-        ln -s ~/anaconda3/envs/kairos/ ~/anaconda3/envs/kairos/envs/Kairos-2
+        mkdir -p ~/anaconda3/envs/kairos-2/envs
+        ln -s ~/anaconda3/envs/kairos-2/ ~/anaconda3/envs/kairos-2/envs/kairos-2
         ```
-        **Note:** Adjust `~/anaconda3/envs/Kairos-2` to the actual path of your `Kairos-2` Conda environment if it's located elsewhere.
+        **Note:** Adjust `~/anaconda3/envs/kairos-2` to the actual path of your `Kairos-2` Conda environment if it's located elsewhere.
 
 **IV. Running Tests:**
 

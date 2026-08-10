@@ -5,8 +5,8 @@ Update means *the software*, per install type:
 * **source checkout** — ``git fetch`` + fast-forward to the branch's upstream, then rebuild
   the Cython extensions if any compiled sources changed. Never crosses branches, never
   merges: a diverged local branch fails with instructions instead of guessing.
-* **Docker** — a container cannot replace its own image; the command fails fast with the
-  exact host-side commands (``docker compose pull && docker compose up -d``).
+* **Podman** — a container cannot replace its own image; the command fails fast with the
+  exact host-side commands (``podman compose pull && podman compose up -d``).
 """
 import os
 import subprocess
@@ -63,8 +63,8 @@ def update(
 ) -> None:
     """Update hbot to the latest version of its branch (source installs)."""
     if os.environ.get("INSTALLATION_TYPE") == "docker":
-        fail("this is a Docker install — a container cannot replace its own image. "
-             "Update from the HOST:  docker compose pull && docker compose up -d",
+        fail("this is a container install — a container cannot replace its own image. "
+             "Update from the HOST:  podman compose pull && podman compose up -d",
              ExitCode.ERROR)
 
     from kairos.cli import bot
@@ -73,7 +73,7 @@ def update(
 
     if not (REPO_ROOT / ".git").exists():
         fail(f"{REPO_ROOT} is not a git checkout — `hbot update` only knows how to update "
-             f"a source install (Docker: docker compose pull && docker compose up -d)",
+             f"a source install (container: podman compose pull && podman compose up -d)",
              ExitCode.ERROR)
 
     _git("fetch", "--quiet")

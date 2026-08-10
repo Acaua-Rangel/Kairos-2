@@ -78,7 +78,10 @@ On first use `hbot` prompts for a keystore password that encrypts your API keys.
 
 Full command reference: **[hbot CLI guide](kairos/cli/README.md)**.
 
-### Docker
+### Podman
+
+Requires [Podman](https://podman.io/docs/installation) and
+[podman-compose](https://github.com/containers/podman-compose).
 
 ```bash
 git clone https://github.com/Acaua-Rangel/Kairos-2.git
@@ -88,12 +91,12 @@ make deploy           # start the container
 make link-cli         # put `hbot` on the host PATH (dispatches into the container)
 ```
 
-Or use the interactive full-screen client with `docker attach kairos-2`.
+Or use the interactive full-screen client with `podman attach kairos-2`.
 
 ## Naming
 
-The Python package is `kairos`; the distribution is `kairos-2`; the conda environment and Docker
-image are `kairos-2`. Two upstream names were deliberately **kept**:
+The Python package is `kairos`; the distribution is `kairos-2`; the conda environment and
+container image are `kairos-2`. Two upstream names were deliberately **kept**:
 
 * **`hbot`** — the CLI command name, so muscle memory and existing scripts keep working.
 * **`hbot` order-id prefixes** (`kairos/connector/utils.py`) — these are part of Binance's broker

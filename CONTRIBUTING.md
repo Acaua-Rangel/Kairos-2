@@ -33,7 +33,7 @@ If you're using VS Code or Cursor IDE, please refer to our [VS Code/Cursor Setup
 Use GitHub's interface to fork the repo, add the Kairos-2 repo as an upstream remote, and fetch upstream data:
 
 ```bash
-git remote add upstream https://github.com/kairos-2.git
+git remote add upstream https://github.com/Acaua-Rangel/Kairos-2.git
 git fetch upstream
 ```
 

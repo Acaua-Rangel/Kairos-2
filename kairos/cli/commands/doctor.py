@@ -36,7 +36,7 @@ def _row(check: str, status: str, detail: str) -> dict:
 # ── individual checks (each returns one row) ────────────────────────────────
 
 def _install_row() -> dict:
-    install = "docker" if os.environ.get("INSTALLATION_TYPE") == "docker" else "source"
+    install = "container" if os.environ.get("INSTALLATION_TYPE") == "docker" else "source"
     version = "unknown"
     try:
         version = (REPO_ROOT / "kairos" / "VERSION").read_text().strip()

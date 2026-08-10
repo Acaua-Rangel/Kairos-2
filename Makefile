@@ -29,7 +29,7 @@ development-diff-cover:
 	diff-cover --compare-branch=origin/development coverage.xml
 
 build:
-	git clean -xdf && make clean && docker build -t kairos-2${TAG} -f Dockerfile .
+	git clean -xdf && make clean && podman build -t kairos-2${TAG} -f Dockerfile .
 
 
 uninstall:
@@ -78,7 +78,7 @@ link-cli:
 	mkdir -p "$$dir"; ln -sf "$$src" "$$dir/hbot"; \
 	echo "Linked $$dir/hbot -> bin/hbot-host"; \
 	case ":$$PATH:" in *":$$dir:"*) ;; *) echo "NOTE: add $$dir to your PATH to run 'hbot'." ;; esac; \
-	echo "Now 'hbot <command>' dispatches to your source env or the docker container."
+	echo "Now 'hbot <command>' dispatches to your source env or the podman container."
 
 run:
 	conda run -n kairos-2 --no-capture-output ./bin/kairos_quickstart.py $(ARGS)
@@ -88,7 +88,7 @@ setup:
 
 deploy:
 	@if [ -f ./.compose.env ]; then set -a; . ./.compose.env; set +a; fi; \
-	docker compose up -d
+	podman compose up -d
 
 down:
-	docker compose down
+	podman compose down

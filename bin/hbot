@@ -9,7 +9,7 @@ import sys
 
 import path_util  # noqa: F401  (puts the repo root ahead of bin/ on sys.path)
 
-from kairos-2.cli.main import main
+from kairos.cli.main import main
 
 if __name__ == "__main__":
     sys.exit(main())

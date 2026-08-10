@@ -85,8 +85,8 @@ trades DB and logs, stale `bot.pid`, and a dangling loaded-config pointer. Any `
 exits 1; warns are advisories and exit 0.
 
 `update` updates **the software**, per install type: a source checkout fast-forwards its branch
-and rebuilds the Cython extensions only when compiled sources changed; inside Docker it fails
-fast with the host-side commands (`docker compose pull && docker compose up -d`) — a container
+and rebuilds the Cython extensions only when compiled sources changed; inside a container it fails
+fast with the host-side commands (`podman compose pull && podman compose up -d`) — a container
 can't replace its own image. It refuses while a bot is running and refuses to guess on a
 diverged branch.
 
@@ -174,7 +174,7 @@ be a creatable strategy name, with every required field supplied via `--set` / `
 ## Roadmap
 
 v1 is a **faithful subset of the interactive Kairos-2 client's commands** — the goal is to give
-existing source/Docker users the commands they already know, non-interactively. Some commands the
+existing source/Podman users the commands they already know, non-interactively. Some commands the
 previous CLI shipped are intentionally deferred so v1 stays close to the client's surface. They'll
 return in later versions:
 
@@ -240,25 +240,25 @@ interactive client's first launch. Every later command must use that same passwo
 
 ---
 
-## Running in Docker
+## Running in Podman
 
 > **Recommended for automated/agent-driven setup.** The image ships with the conda env and compiled
 > Cython extensions prebuilt, so there's no Miniconda download, `conda env create`, ToS prompt, or
 > multi-minute extension compile — just `make deploy && make link-cli`. Reach for the source install
 > only when you're building or modifying the code.
 
-`hbot` works the same in Docker as from source — same commands, same flow. By default `make deploy`
-brings up the `Kairos-2` container running the classic **interactive client** (`docker attach
-Kairos-2` to use it). To dedicate the container to `hbot` instead, opt in to the **idle "hbot
+`hbot` works the same in Podman as from source — same commands, same flow. By default `make deploy`
+brings up the `kairos-2` container running the classic **interactive client** (`podman attach
+kairos-2` to use it). To dedicate the container to `hbot` instead, opt in to the **idle "hbot
 host"** mode — the container just stays up and every `hbot` command execs into it — by uncommenting
 one line in `docker-compose.yml`:
 
 ```bash
-# docker-compose.yml, under the Kairos-2 service, uncomment:
+# docker-compose.yml, under the kairos-2 service, uncomment:
 #   command: tail -f /dev/null
 
 make deploy        # start the container (an idle hbot host)
-make link-cli      # install the host `hbot` command (-> docker exec into the container)
+make link-cli      # install the host `hbot` command (-> podman exec into the container)
 
 hbot connect binance              # exactly the same commands as a source install
 hbot import conf_my_bot.yml       # load a config you've placed in conf/
@@ -267,28 +267,28 @@ hbot status ; hbot logs -f ; hbot stop
 ```
 
 The wrapper (`bin/hbot-host`) auto-detects where to run: standing inside a compose project whose
-`Kairos-2` container is running → `docker exec` into it (the `conf`/`data`/`logs` dirs there are
+`kairos-2` container is running → `podman exec` into it (the `conf`/`data`/`logs` dirs there are
 bind mounts owned by the container's user, so the host CLI couldn't write them anyway); else a
-`Kairos-2` conda env → run there; else a running `Kairos-2` container → `docker exec` into it.
-So one `hbot <command>` works regardless of how you installed, and `HBOT_PREFER=docker` forces the
+`kairos-2` conda env → run there; else a running `kairos-2` container → `podman exec` into it.
+So one `hbot <command>` works regardless of how you installed, and `HBOT_PREFER=container` forces the
 container on machines that have both. (Without the wrapper,
-`docker exec -it Kairos-2 hbot <command>` does the same thing.)
+`podman exec -it kairos-2 hbot <command>` does the same thing.)
 
 > The idle-host container must run a real init (the compose file sets `init: true`) so the bot
-> process — which reparents to PID 1 after the `docker exec` that started it returns — gets **reaped**
+> process — which reparents to PID 1 after the `podman exec` that started it returns — gets **reaped**
 > on exit. A bare `tail` PID 1 won't reap it, leaving a zombie that makes `hbot stop` wait its full
-> timeout. If you `docker run` your own idle host, pass `--init`.
+> timeout. If you `podman run` your own idle host, pass `--init`.
 
 ### One dedicated bot per container
 
 For orchestration (one container = one bot, restart policies), make the bot the container's main
-process with `hbot start --foreground` — then `docker stop` sends SIGTERM and the bot shuts down
+process with `hbot start --foreground` — then `podman stop` sends SIGTERM and the bot shuts down
 gracefully (cancelling orders):
 
 ```yaml
 services:
   bot:
-    image: kairos/Kairos-2
+    image: kairos-2
     environment: [HBOT_PASSWORD]
     volumes:
       - ./conf:/home/kairos/conf
