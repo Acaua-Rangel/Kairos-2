@@ -85,4 +85,8 @@ SHELL [ "/bin/bash", "-lc" ]
 
 # Set the default command to run when starting the container
 
-CMD conda activate kairos-2 && ./bin/kairos_quickstart.py 2>> ./logs/errors.log
+# Exec form (not shell form) so this runs via bash -lc regardless of how the builder translates
+# shell-form CMD/ENTRYPOINT — buildah (podman build) was observed wrapping shell-form CMD in
+# `/bin/sh -c` even with `--format docker` and the SHELL instruction above set to bash -lc, which
+# breaks `conda activate` (needs `conda.sh` sourced, which only happens under bash -l).
+CMD ["/bin/bash", "-lc", "conda activate kairos-2 && ./bin/kairos_quickstart.py 2>> ./logs/errors.log"]
