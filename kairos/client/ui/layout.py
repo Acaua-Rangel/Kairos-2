@@ -61,7 +61,7 @@ HEADER = """
 ██   ██ ██   ██ ██ ██   ██  ██████  ███████        ███████
 
 ======================================================================================
-Kairos-2 is a market making trading client for Binance, forked from Kairos-2.
+Kairos-2 is a market making trading client for Binance, forked from Hummingbot.
 
 - Repo: https://github.com/Acaua-Rangel/Kairos-2
 - Upstream project: https://github.com/hummingbot/hummingbot

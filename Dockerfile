@@ -1,5 +1,5 @@
 # Set the base image
-FROM continuumio/miniconda3:latest AS builder
+FROM docker.io/continuumio/miniconda3:latest AS builder
 
 # Install system dependencies
 RUN apt-get update && \
@@ -39,7 +39,7 @@ RUN python3 setup.py build_ext --inplace -j 8 && \
 
 
 # Build final image using artifacts from builder
-FROM continuumio/miniconda3:latest AS release
+FROM docker.io/continuumio/miniconda3:latest AS release
 
 # Dockerfile author / maintainer
 LABEL maintainer="Fede Cardoso @dardonacci <federico@hummingbot.org>"

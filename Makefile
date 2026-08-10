@@ -29,7 +29,7 @@ development-diff-cover:
 	diff-cover --compare-branch=origin/development coverage.xml
 
 build:
-	git clean -xdf && make clean && podman build -t kairos-2${TAG} -f Dockerfile .
+	git clean -xdf && make clean && podman build --format docker -t kairos-2${TAG} -f Dockerfile .
 
 
 uninstall:
