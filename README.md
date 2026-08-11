@@ -38,28 +38,19 @@ Candles feeds and rate-oracle sources were narrowed to Binance, CoinGecko, and C
 
 ## Getting started
 
-Requires [Anaconda or Miniconda](https://www.anaconda.com/download).
+Requires Python 3.10+ and a C++ compiler (`gcc`/`g++`) to build the Cython extensions.
 
 ```bash
 git clone https://github.com/Acaua-Rangel/Kairos-2.git
 cd Kairos-2
 
-make install            # create the conda env, build the Cython extensions, expose `hbot`
-conda activate kairos-2
+make install            # create a venv (.venv), build the Cython extensions, expose `hbot`
+make link-cli            # put `hbot` on your PATH
 hbot --help
 ```
 
 The CLI command is still named `hbot`, and so are the exchange order-id prefixes — see
 [Naming](#naming) below.
-
-Don't want to install Conda/Miniconda? `make install-venv` sets up a plain Python `venv` instead —
-lighter, no Conda download, same `hbot` CLI:
-
-```bash
-make install-venv
-make link-cli
-hbot --help
-```
 
 ### Paper trading first
 
@@ -104,9 +95,9 @@ Or use the interactive full-screen client with `podman attach kairos-2`.
 
 ### Deploying on a small cloud VM (e.g. AWS `t4g.small`)
 
-Tested on a 2GB-RAM ARM64 Ubuntu instance. `make install-venv` is the lightest path here — no
-Conda, no container — but still needs a compiler toolchain to build the Cython extensions, and a
-swapfile is cheap insurance on a 2GB instance.
+Tested on a 2GB-RAM ARM64 Ubuntu instance. `make install` (no container) is the lightest path
+here, but still needs a compiler toolchain to build the Cython extensions, and a swapfile is
+cheap insurance on a 2GB instance.
 
 ```bash
 # 1. system dependencies
@@ -123,7 +114,7 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 # 3. clone and install (note: the branch, not master)
 git clone -b kairos-2 https://github.com/Acaua-Rangel/Kairos-2.git
 cd Kairos-2
-make install-venv
+make install
 make link-cli
 # open a new shell (or `source ~/.bashrc`) to pick up the updated PATH
 
@@ -139,17 +130,17 @@ hbot logs -f
 ```
 
 If the VM reboots, run `hbot start conf_paper_bot.yml` again — nothing here wires the bot to
-auto-restart. If `make install-venv` fails partway through on a low-RAM instance, grow the
+auto-restart. If `make install` fails partway through on a low-RAM instance, grow the
 swapfile (`sudo swapoff /swapfile && sudo fallocate -l 8G /swapfile && sudo mkswap /swapfile &&
-sudo swapon /swapfile`) and re-run `make install-venv`; it picks up where it left off.
+sudo swapon /swapfile`) and re-run `make install`; it picks up where it left off.
 
 Prefer an isolated container instead? See [Podman](#podman) above — same VM prep (steps 1-2 apply
 to `python3-venv`/`gcc`/`g++`/`make` only; swap out the package list for `podman podman-compose`).
 
 ## Naming
 
-The Python package is `kairos`; the distribution is `kairos-2`; the conda environment and
-container image are `kairos-2`. Two upstream names were deliberately **kept**:
+The Python package is `kairos`; the distribution is `kairos-2`; the container image is
+`kairos-2`. Two upstream names were deliberately **kept**:
 
 * **`hbot`** — the CLI command name, so muscle memory and existing scripts keep working.
 * **`hbot` order-id prefixes** (`kairos/connector/utils.py`) — these are part of Binance's broker

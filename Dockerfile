@@ -8,7 +8,7 @@ RUN apt-get update && \
 
 WORKDIR /home/kairos
 
-# Create a venv and install runtime dependencies (no Conda/Miniconda download)
+# Create a venv and install runtime dependencies
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
@@ -85,7 +85,5 @@ RUN ln -sf /home/kairos/bin/hbot /opt/venv/bin/hbot
 
 # Set the default command to run when starting the container.
 # Exec form (not shell form) for a deterministic launch regardless of how the
-# builder translates shell-form CMD/ENTRYPOINT (see git history for the
-# buildah/Conda issue this used to hit — no longer applicable without Conda,
-# but exec form is kept as the safer default).
+# builder translates shell-form CMD/ENTRYPOINT.
 CMD ["/bin/bash", "-c", "python3 ./bin/kairos_quickstart.py 2>> ./logs/errors.log"]

@@ -242,10 +242,10 @@ interactive client's first launch. Every later command must use that same passwo
 
 ## Running in Podman
 
-> **Recommended for automated/agent-driven setup.** The image ships with the conda env and compiled
-> Cython extensions prebuilt, so there's no Miniconda download, `conda env create`, ToS prompt, or
-> multi-minute extension compile — just `make deploy && make link-cli`. Reach for the source install
-> only when you're building or modifying the code.
+> **Recommended for automated/agent-driven setup.** The image ships with the venv and compiled
+> Cython extensions prebuilt, so there's no compiler toolchain, no multi-minute extension compile —
+> just `make deploy && make link-cli`. Reach for the source install only when you're building or
+> modifying the code.
 
 `hbot` works the same in Podman as from source — same commands, same flow. By default `make deploy`
 brings up the `kairos-2` container running the classic **interactive client** (`podman attach
@@ -269,9 +269,9 @@ hbot status ; hbot logs -f ; hbot stop
 The wrapper (`bin/hbot-host`) auto-detects where to run: standing inside a compose project whose
 `kairos-2` container is running → `podman exec` into it (the `conf`/`data`/`logs` dirs there are
 bind mounts owned by the container's user, so the host CLI couldn't write them anyway); else a
-`kairos-2` conda env → run there; else a running `kairos-2` container → `podman exec` into it.
-So one `hbot <command>` works regardless of how you installed, and `HBOT_PREFER=container` forces the
-container on machines that have both. (Without the wrapper,
+source-install venv (from `make install`) → run there; else a running `kairos-2` container →
+`podman exec` into it. So one `hbot <command>` works regardless of how you installed, and
+`HBOT_PREFER=container` forces the container on machines that have both. (Without the wrapper,
 `podman exec -it kairos-2 hbot <command>` does the same thing.)
 
 > The idle-host container must run a real init (the compose file sets `init: true`) so the bot

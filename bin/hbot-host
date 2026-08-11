@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 #
 # Unified host launcher for the `hbot` CLI: makes `hbot <command>` work the same whether Kairos-2
-# was installed from source (a `kairos-2` conda env, or a plain venv from `make install-venv`) or
-# via Podman (a `kairos-2` container). It just dispatches to the real CLI that lives inside the
-# env/venv/container — see bin/hbot.
+# was installed from source (a venv from `make install`) or via Podman (a `kairos-2` container).
+# It just dispatches to the real CLI that lives inside the venv/container — see bin/hbot.
 #
 # Install it as the host `hbot` with `make link-cli` (symlinks this onto your PATH).
 #
@@ -15,16 +14,16 @@ container="${HBOT_CONTAINER:-kairos-2}"
 # container via Docker Compose instead.
 engine="${HBOT_ENGINE:-podman}"
 
-# HBOT_PREFER=container skips the conda-env branch, for machines that have BOTH installs and want
-# `hbot` to drive the container (e.g. testing the Podman/MCP setup next to a source checkout).
-# Anything else (unset, empty, "conda") keeps the default order: source env first, then container.
+# HBOT_PREFER=container skips the source-install branch, for machines that have BOTH installs and
+# want `hbot` to drive the container (e.g. testing the Podman/MCP setup next to a source checkout).
+# Anything else (unset, empty) keeps the default order: source install first, then container.
 prefer="${HBOT_PREFER:-}"
 
 # 0) Standing inside the compose project a RUNNING container was deployed from means you mean THAT
-#    deployment, even on a machine that also has a conda env: the conf/data/logs dirs here are bind
-#    mounts owned by the container's user, so running the source CLI against them just dies with
-#    PermissionError. Detected via the compose working_dir label; single-install machines and other
-#    directories are unaffected, and an explicit HBOT_PREFER (container OR conda) still wins.
+#    deployment, even on a machine that also has a source install: the conf/data/logs dirs here are
+#    bind mounts owned by the container's user, so running the source CLI against them just dies
+#    with PermissionError. Detected via the compose working_dir label; single-install machines and
+#    other directories are unaffected, and an explicit HBOT_PREFER still wins.
 if [ -z "$prefer" ] && command -v "$engine" >/dev/null 2>&1 \
         && "$engine" ps --format '{{.Names}}' 2>/dev/null | grep -qx "$container"; then
     compose_dir="$("$engine" inspect --format \
@@ -34,28 +33,12 @@ if [ -z "$prefer" ] && command -v "$engine" >/dev/null 2>&1 \
     fi
 fi
 
-# 1) Source install: a `kairos-2` conda env that has the CLI. Exec the env's python DIRECTLY rather
-#    than via `conda run`, which prints a noisy "ERROR conda.cli.main_run:execute(148): ... failed"
-#    line on EVERY non-zero exit — including the CLI's normal ones (exit 2 for "no command, here's
-#    help"; exit 4 for "need password") — making a healthy CLI look broken. We resolve the env prefix
-#    and set PATH/CONDA_PREFIX ourselves so the CLI and its subprocesses still run inside the env, and
-#    the CLI's real exit code passes straight through. Run the INSTALLED package (via conda develop) —
-#    not the name `hbot` (would re-resolve to this wrapper and recurse).
-if [ "$prefer" != "container" ] && command -v conda >/dev/null 2>&1; then
-    prefix="$(conda env list | awk '$1=="kairos-2"{print $NF}')"
-    if [ -n "$prefix" ] && [ -x "$prefix/bin/python" ]; then
-        export CONDA_PREFIX="$prefix"
-        export PATH="$prefix/bin:$PATH"
-        exec "$prefix/bin/python" \
-            -c "import sys; sys.argv[0]='hbot'; from kairos.cli.main import main; sys.exit(main())" "$@"
-    fi
-fi
-
-# 1b) Source install: a plain venv from `make install-venv` (no Conda). Located via the pointer
-#    file that target writes — a venv has no `conda env list`-style registry of its own. Same
-#    rationale as the conda branch above for invoking python directly instead of a wrapper. The
-#    repo root is inserted on sys.path explicitly (mirrors bin/path_util.py) since a plain venv,
-#    unlike `conda develop .`, has no permanent sys.path entry for it.
+# 1) Source install: a venv from `make install`. Located via the pointer file that target writes,
+#    since a plain venv has no `conda env list`-style registry of its own. Exec the venv's python
+#    directly (not a wrapper) so the CLI's real exit code passes straight through. The repo root is
+#    inserted on sys.path explicitly (mirrors bin/path_util.py), since a plain venv has no
+#    permanent sys.path entry for it. Run the INSTALLED package, not the name `hbot` (would
+#    re-resolve to this wrapper and recurse).
 if [ "$prefer" != "container" ] && [ -f "$HOME/.local/share/kairos-2/source-path" ]; then
     src_dir="$(cat "$HOME/.local/share/kairos-2/source-path" 2>/dev/null || true)"
     if [ -n "$src_dir" ] && [ -x "$src_dir/.venv/bin/python3" ]; then
@@ -82,7 +65,6 @@ if command -v "$engine" >/dev/null 2>&1 && "$engine" ps --format '{{.Names}}' | 
 fi
 
 echo "hbot: no Kairos-2 install found." >&2
-echo "  source (conda): make install && conda activate kairos-2" >&2
-echo "  source (venv):  make install-venv" >&2
+echo "  source:              make install" >&2
 echo "  container ($engine): make deploy   (starts the '$container' container)" >&2
 exit 1

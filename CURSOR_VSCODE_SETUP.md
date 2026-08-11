@@ -5,7 +5,8 @@ This guide outlines how to configure VS Code or Cursor to efficiently run and de
 **I. Prerequisites:**
 
 * **Kairos-2 Repository:** You have cloned the Kairos-2 repository to your local machine.
-* **Conda Environment:** You have created and activated the `Kairos-2` Conda environment with all necessary dependencies installed.
+* **Venv:** You have run `make install`, which creates `.venv/` and compiles the Cython
+  extensions into it.
 
 **II. Required Files and Configuration:**
 
@@ -15,11 +16,9 @@ Ensure the following files exist in your Kairos-2 project directory with the spe
 
 ```
 PYTHONPATH=${PYTHONPATH}:${PWD}
-CONDA_ENV=Kairos-2
 ```
 
 * **`PYTHONPATH`**: This ensures that Python can find the Kairos-2 modules within your project directory.
-* **`CONDA_ENV`**: This variable can be used by other tools or scripts to identify the active Conda environment.
 
 **2. `.vscode/settings.json` (Create this directory and file if it doesn't exist):**
 
@@ -31,12 +30,12 @@ CONDA_ENV=Kairos-2
         // "-v",  // optional: verbose output
 
         // From MakeFile (currently broken tests - KEEP UPDATED)
+        "--ignore=test/mock",
+        "--ignore=test/kairos/connector/exchange/ndax/",
         "--ignore=test/kairos/connector/derivative/dydx_v4_perpetual/",
-        "--ignore=test/kairos/connector/derivative/injective_v2_perpetual/",
-        "--ignore=test/kairos/connector/exchange/injective_v2/",
-        "--ignore=test/kairos/remote_iface/",
         "--ignore=test/connector/utilities/oms_connector/",
         "--ignore=test/kairos/strategy/amm_arb/",
+        "--ignore=test/kairos/strategy/cross_exchange_market_making/",
 
         // Skip prompt tests that modify conf_client.yml
         "--ignore=test/kairos/client/command/test_create_command.py",
@@ -73,18 +72,10 @@ CONDA_ENV=Kairos-2
 2.  **Select the Python Interpreter:**
     * Open the Command Palette: Press `Ctrl+Shift+P` (Windows/Linux) or `Cmd+Shift+P` (macOS).
     * Type "Python: Select Interpreter" and press Enter.
-    * A list of available Python interpreters will appear. **Select the Python interpreter associated with your `Kairos-2` Conda environment.** The path should typically include the name of your Conda environment.
+    * A list of available Python interpreters will appear. **Select `./.venv/bin/python3`** (VS Code/Cursor
+      usually surfaces it automatically as a recommended workspace interpreter once `.venv/` exists).
 
 3.  **Ensure `.env` is Loaded:** VS Code/Cursor should automatically load the `.env` file specified in `settings.json`. You can verify this by checking the Python environment variables within the IDE's terminal or debug configurations.
-
-4.  **Fix Test Discovery (Conda Environment Issue):**
-    * Open your terminal.
-    * Run the following commands to create a symbolic link to work around a known Conda environment detection issue:
-        ```bash
-        mkdir -p ~/anaconda3/envs/kairos-2/envs
-        ln -s ~/anaconda3/envs/kairos-2/ ~/anaconda3/envs/kairos-2/envs/kairos-2
-        ```
-        **Note:** Adjust `~/anaconda3/envs/kairos-2` to the actual path of your `Kairos-2` Conda environment if it's located elsewhere.
 
 **IV. Running Tests:**
 
