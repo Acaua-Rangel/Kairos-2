@@ -1,7 +1,9 @@
 .ONESHELL:
-.PHONY: test run run_coverage report_coverage development-diff-cover uninstall build install setup deploy down link-cli
+.PHONY: test run run_coverage report_coverage development-diff-cover uninstall build install setup deploy down link-cli install-venv uninstall-venv run-venv
 
 ENV_FILE := setup/environment.yml
+VENV_DIR := $(CURDIR)/.venv
+KAIROS_STATE_DIR := $(HOME)/.local/share/kairos-2
 
 test:
 	coverage run -m pytest \
@@ -59,6 +61,37 @@ install:
 	@conda run -n kairos-2 bash -c 'ln -sf "$(CURDIR)/bin/hbot" "$$CONDA_PREFIX/bin/hbot"'
 	@echo "Done. Run: conda activate kairos-2 && hbot --help"
 
+install-venv:
+	@mkdir -p logs
+	@if ! command -v python3 >/dev/null 2>&1; then \
+		echo "Error: python3 is not found in PATH."; \
+		exit 1; \
+	fi
+	@if [ "$$(uname)" = "Linux" ] && command -v apt-get >/dev/null 2>&1; then \
+		if ! (command -v gcc >/dev/null 2>&1 && command -v g++ >/dev/null 2>&1) \
+		     || ! python3 -m venv --help >/dev/null 2>&1; then \
+			echo "Compiler toolchain or python3-venv missing, installing..."; \
+			sudo apt-get update && sudo apt-get install -y build-essential python3-venv python3-dev; \
+		fi; \
+	fi
+	python3 -m venv "$(VENV_DIR)"
+	"$(VENV_DIR)/bin/pip" install --upgrade pip setuptools wheel
+	"$(VENV_DIR)/bin/pip" install Cython "numpy>=2.2.6"
+	"$(VENV_DIR)/bin/pip" install -r setup/requirements.txt
+	"$(VENV_DIR)/bin/pip" install --no-deps -r setup/pip_packages.txt > logs/pip_install.log 2>&1
+	"$(VENV_DIR)/bin/python3" setup.py build_ext --inplace -j$$(nproc 2>/dev/null || echo 4)
+	ln -sf "$(CURDIR)/bin/hbot" "$(VENV_DIR)/bin/hbot"
+	@mkdir -p "$(KAIROS_STATE_DIR)"
+	@echo "$(CURDIR)" > "$(KAIROS_STATE_DIR)/source-path"
+	@echo "Done. Run: $(VENV_DIR)/bin/python3 bin/hbot --help  (or 'make link-cli' then 'hbot --help')"
+
+uninstall-venv:
+	rm -rf "$(VENV_DIR)"
+	rm -f "$(KAIROS_STATE_DIR)/source-path"
+
+run-venv:
+	"$(VENV_DIR)/bin/python3" ./bin/kairos_quickstart.py $(ARGS)
+
 link-cli:
 	@src="$(CURDIR)/bin/hbot-host"; dir="$${HBOT_BIN:-}"; \
 	if [ -z "$$dir" ]; then \
@@ -74,7 +107,7 @@ link-cli:
 	mkdir -p "$$dir"; ln -sf "$$src" "$$dir/hbot"; \
 	echo "Linked $$dir/hbot -> bin/hbot-host"; \
 	case ":$$PATH:" in *":$$dir:"*) ;; *) echo "NOTE: add $$dir to your PATH to run 'hbot'." ;; esac; \
-	echo "Now 'hbot <command>' dispatches to your source env or the podman container."
+	echo "Now 'hbot <command>' dispatches to your source install (conda or venv) or the podman container."
 
 run:
 	conda run -n kairos-2 --no-capture-output ./bin/kairos_quickstart.py $(ARGS)

@@ -52,6 +52,15 @@ hbot --help
 The CLI command is still named `hbot`, and so are the exchange order-id prefixes — see
 [Naming](#naming) below.
 
+Don't want to install Conda/Miniconda? `make install-venv` sets up a plain Python `venv` instead —
+lighter, no Conda download, same `hbot` CLI:
+
+```bash
+make install-venv
+make link-cli
+hbot --help
+```
+
 ### Paper trading first
 
 `binance_paper_trade` simulates fills against live Binance market data, so no API keys are needed:

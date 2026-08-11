@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # Unified host launcher for the `hbot` CLI: makes `hbot <command>` work the same whether Kairos-2
-# was installed from source (a `kairos-2` conda env) or via Podman (a `kairos-2` container). It
-# just dispatches to the real CLI that lives inside the env/container — see bin/hbot.
+# was installed from source (a `kairos-2` conda env, or a plain venv from `make install-venv`) or
+# via Podman (a `kairos-2` container). It just dispatches to the real CLI that lives inside the
+# env/venv/container — see bin/hbot.
 #
 # Install it as the host `hbot` with `make link-cli` (symlinks this onto your PATH).
 #
@@ -50,6 +51,19 @@ if [ "$prefer" != "container" ] && command -v conda >/dev/null 2>&1; then
     fi
 fi
 
+# 1b) Source install: a plain venv from `make install-venv` (no Conda). Located via the pointer
+#    file that target writes — a venv has no `conda env list`-style registry of its own. Same
+#    rationale as the conda branch above for invoking python directly instead of a wrapper. The
+#    repo root is inserted on sys.path explicitly (mirrors bin/path_util.py) since a plain venv,
+#    unlike `conda develop .`, has no permanent sys.path entry for it.
+if [ "$prefer" != "container" ] && [ -f "$HOME/.local/share/kairos-2/source-path" ]; then
+    src_dir="$(cat "$HOME/.local/share/kairos-2/source-path" 2>/dev/null || true)"
+    if [ -n "$src_dir" ] && [ -x "$src_dir/.venv/bin/python3" ]; then
+        exec "$src_dir/.venv/bin/python3" \
+            -c "import sys; sys.path.insert(0, '$src_dir'); sys.argv[0]='hbot'; from kairos.cli.main import main; sys.exit(main())" "$@"
+    fi
+fi
+
 # 2) Container install: a running `kairos-2` container (Podman by default, or Docker if
 #    HBOT_ENGINE=docker). `-i` forwards stdin (e.g. --password-stdin); add a TTY only when this
 #    shell has one, so piping still works. The keystore password env vars must be forwarded
@@ -68,6 +82,7 @@ if command -v "$engine" >/dev/null 2>&1 && "$engine" ps --format '{{.Names}}' | 
 fi
 
 echo "hbot: no Kairos-2 install found." >&2
-echo "  source: make install && conda activate kairos-2" >&2
+echo "  source (conda): make install && conda activate kairos-2" >&2
+echo "  source (venv):  make install-venv" >&2
 echo "  container ($engine): make deploy   (starts the '$container' container)" >&2
 exit 1
