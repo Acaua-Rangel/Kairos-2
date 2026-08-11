@@ -1,14 +1,9 @@
-import binascii
-import importlib
 import logging
 import shutil
-from os import DirEntry, scandir
-from os.path import exists, join
-from typing import Any, Dict, List, Optional, Union, cast
+from typing import Any, Dict, List, Optional, Union
 
 import yaml
 
-from kairos import root_path
 from kairos.client.config.client_config_map import (
     AnonymizedMetricsDisabledMode,
     AnonymizedMetricsEnabledMode,
@@ -19,34 +14,14 @@ from kairos.client.config.client_config_map import (
     KillSwitchDisabledMode,
     KillSwitchEnabledMode,
 )
-from kairos.client.config.config_crypt import BaseSecretsManager, store_password_verification
-from kairos.client.config.config_data_types import BaseConnectorConfigMap
 from kairos.client.config.config_helpers import ClientConfigAdapter, save_to_yml
-from kairos.client.config.security import Security
 from kairos.client.settings import CLIENT_CONFIG_PATH, CONF_DIR_PATH, STRATEGIES_CONF_DIR_PATH
 from kairos.strategy.avellaneda_market_making.avellaneda_market_making_config_map_pydantic import (
     AvellanedaMarketMakingConfigMap,
 )
 
-encrypted_conf_prefix = "encrypted_"
-encrypted_conf_postfix = ".json"
 conf_dir_path = CONF_DIR_PATH
 strategies_conf_dir_path = STRATEGIES_CONF_DIR_PATH
-
-
-def migrate_configs(secrets_manager: BaseSecretsManager) -> List[str]:
-    logging.getLogger().info("Starting conf migration.")
-    errors = backup_existing_dir()
-    if len(errors) == 0:
-        errors = migrate_global_config()
-        if len(errors) == 0:
-            errors.extend(migrate_strategy_confs_paths())
-            errors.extend(migrate_connector_confs(secrets_manager))
-            store_password_verification(secrets_manager)
-            logging.getLogger().info("\nConf migration done.")
-    else:
-        logging.getLogger().error("\nConf migration failed.")
-    return errors
 
 
 def migrate_non_secure_configs_only() -> List[str]:
@@ -296,7 +271,6 @@ def migrate_amm_confs(conf, new_path) -> List[str]:
     return errors
 
 
-
 def _has_connector_field(conf: Dict) -> bool:
     return (
         "exchange" in conf
@@ -309,71 +283,3 @@ def _has_connector_field(conf: Dict) -> bool:
         or "spot_connector" in conf  # spot-perp arb
         or "connector" in conf  # twap
     )
-
-
-def migrate_connector_confs(secrets_manager: BaseSecretsManager):
-    logging.getLogger().info("\nMigrating connector secure keys...")
-    errors = []
-    Security.secrets_manager = secrets_manager
-    connector_exceptions = ["paper_trade"]
-    type_dirs: List[DirEntry] = [
-        cast(DirEntry, f) for f in
-        scandir(f"{root_path() / 'kairos' / 'connector'}")
-        if f.is_dir()
-    ]
-    for type_dir in type_dirs:
-        connector_dirs: List[DirEntry] = [
-            cast(DirEntry, f) for f in scandir(type_dir.path)
-            if f.is_dir() and exists(join(f.path, "__init__.py"))
-        ]
-        for connector_dir in connector_dirs:
-            if connector_dir.name.startswith("_") or connector_dir.name in connector_exceptions:
-                continue
-            try:
-                suffix = "data_types" if connector_dir.name == "celo" else "utils"
-                util_module_path: str = (
-                    f"kairos.connector.{type_dir.name}.{connector_dir.name}.{connector_dir.name}_{suffix}"
-                )
-                util_module = importlib.import_module(util_module_path)
-                config_keys = getattr(util_module, "KEYS", None)
-                if config_keys is not None:
-                    errors.extend(_maybe_migrate_encrypted_confs(config_keys))
-                other_domains = getattr(util_module, "OTHER_DOMAINS", [])
-                for domain in other_domains:
-                    config_keys = getattr(util_module, "OTHER_DOMAINS_KEYS")[domain]
-                    if config_keys is not None:
-                        errors.extend(_maybe_migrate_encrypted_confs(config_keys))
-            except ModuleNotFoundError:
-                continue
-    return errors
-
-
-def _maybe_migrate_encrypted_confs(config_keys: BaseConnectorConfigMap) -> List[str]:
-    cm = ClientConfigAdapter(config_keys)
-    found_one = False
-    files_to_remove = []
-    missing_fields = []
-    for el in cm.traverse():
-        if el.client_field_data is not None:
-            key_path = conf_dir_path / f"{encrypted_conf_prefix}{el.attr}{encrypted_conf_postfix}"
-            if key_path.exists():
-                with open(key_path, 'r') as f:
-                    json_str = f.read()
-                value = binascii.hexlify(json_str.encode()).decode()
-                if not el.client_field_data.is_secure:
-                    value = Security.secrets_manager.decrypt_secret_value(el.attr, value)
-                cm.setattr_no_validation(el.attr, value)
-                files_to_remove.append(key_path)
-                found_one = True
-            else:
-                missing_fields.append(el.attr)
-    errors = []
-    if found_one:
-        if len(missing_fields) != 0:
-            errors = [f"{config_keys.connector} - missing fields: {missing_fields}"]
-        else:
-            Security.update_secure_config(cm)
-            logging.getLogger().info(f"Migrated secure keys for {config_keys.connector}")
-        for f in files_to_remove:
-            f.unlink()
-    return errors

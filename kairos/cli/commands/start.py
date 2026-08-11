@@ -12,7 +12,6 @@ import typer
 from kairos import prefix_path
 from kairos.cli import bot
 from kairos.cli.output import ExitCode, emit, fail, json_option, render_kv
-from kairos.cli.password import login
 
 
 def _log_tail(lines: int = 20) -> str:
@@ -52,8 +51,6 @@ def start(
         False, "--replace", help="If a bot is already running, stop it first, then start this one."),
     foreground: bool = typer.Option(
         False, "--foreground", help="Run the bot in the foreground (use as a container's main process)."),
-    password_stdin: bool = typer.Option(
-        False, "--password-stdin", help="Read the keystore password from stdin (else $HBOT_PASSWORD or a prompt)."),
     auto_set_permissions: Optional[str] = typer.Option(
         None, "--auto-set-permissions", help="user:group to chown conf/data/logs (container)."),
     timeout: float = typer.Option(120.0, "--timeout", help="Seconds to wait for the bot to start."),
@@ -66,13 +63,13 @@ def start(
     exists under more than one type. By default the bot runs detached (the command returns); pass
     --foreground to run it in the foreground, e.g. as a Podman container's main process."""
     record = launch(file=file, v1=v1, v2=v2, controller=controller, replace=replace,
-                    foreground=foreground, password_stdin=password_stdin,
+                    foreground=foreground,
                     auto_set_permissions=auto_set_permissions, timeout=timeout)
     emit(record, render_kv(record, title="start"), as_json)
 
 
 def launch(*, file: Optional[str], v1: bool = False, v2: bool = False, controller: bool = False,
-           replace: bool = False, foreground: bool = False, password_stdin: bool = False,
+           replace: bool = False, foreground: bool = False,
            auto_set_permissions: Optional[str] = None, timeout: float = 120.0) -> dict:
     """The core of ``hbot start`` — resolve, spawn, wait for readiness; returns the start record.
 
@@ -81,12 +78,7 @@ def launch(*, file: Optional[str], v1: bool = False, v2: bool = False, controlle
     # Filename->type resolution shared with `hbot config`/`hbot import`: a flag forces the type, else
     # it's detected from the conf dirs (names are unique across types).
     from kairos.cli.commands._common import one_type
-    from kairos.cli.strategy_configs import (
-        config_path,
-        resolve_config_type,
-        validate_controller,
-        wrap_controller_as_v2,
-    )
+    from kairos.cli.strategy_configs import config_path, resolve_config_type, validate_controller, wrap_controller_as_v2
 
     # No file given: run the config `hbot import` (or a previous `hbot start`) loaded, and force its
     # recorded type so a later cross-type name collision doesn't demand a flag.
@@ -135,10 +127,6 @@ def launch(*, file: Optional[str], v1: bool = False, v2: bool = False, controlle
     # names the structured log and the trades DB, so logs/trades/history line up.
     name = Path(v2_conf or config_file_name).stem
 
-    # Resolve and validate the password up front so failures are immediate (not buried in the
-    # detached log). The password is passed to the child via env, never on argv.
-    _, password = login(password_stdin=password_stdin)
-
     bot.bot_dir().mkdir(parents=True, exist_ok=True)
     bot.write_meta({
         "name": name,
@@ -157,7 +145,7 @@ def launch(*, file: Optional[str], v1: bool = False, v2: bool = False, controlle
     if auto_set_permissions:
         cmd += ["--auto-set-permissions", auto_set_permissions]
 
-    env = dict(os.environ, HBOT_PASSWORD=password)
+    env = dict(os.environ)
 
     if foreground:
         # Replace this process with the engine so the bot runs in the FOREGROUND — the right shape for a

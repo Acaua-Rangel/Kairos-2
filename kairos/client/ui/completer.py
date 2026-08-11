@@ -11,7 +11,6 @@ from prompt_toolkit.completion import CompleteEvent, Completer, WordCompleter
 from prompt_toolkit.document import Document
 
 from kairos.client import settings
-from kairos.client.command.connect_command import OPTIONS as CONNECT_OPTIONS
 from kairos.client.config.config_data_types import BaseClientModel
 from kairos.client.settings import (
     SCRIPT_STRATEGIES_PATH,
@@ -19,16 +18,19 @@ from kairos.client.settings import (
     STRATEGIES,
     STRATEGIES_CONF_DIR_PATH,
     AllConnectorSettings,
+    connectable_exchange_names,
 )
 from kairos.client.ui.parser import ThrowingArgumentParser
 from kairos.core.rate_oracle.rate_oracle import RATE_ORACLE_SOURCES
 from kairos.core.utils.trading_pair_fetcher import TradingPairFetcher
 from kairos.strategy.strategy_v2_base import StrategyV2ConfigBase
 
+
 def file_name_list(path, file_extension):
     if not exists(path):
         return []
     return sorted([f for f in listdir(path) if isfile(join(path, f)) and f.endswith(file_extension)])
+
 
 class KairosCompleter(Completer):
     def __init__(self, kairos_application):
@@ -43,7 +45,7 @@ class KairosCompleter(Completer):
         self._trading_timeframe_completer = WordCompleter(["infinite", "from_date_to_date", "daily_between_times"], ignore_case=True)
         self._derivative_completer = WordCompleter(AllConnectorSettings.get_derivative_names(), ignore_case=True)
         self._derivative_exchange_completer = WordCompleter(AllConnectorSettings.get_derivative_names(), ignore_case=True)
-        self._connect_option_completer = WordCompleter(CONNECT_OPTIONS, ignore_case=True)
+        self._exchange_name_completer = WordCompleter(sorted(connectable_exchange_names()), ignore_case=True)
         self._export_completer = WordCompleter(["keys", "trades"], ignore_case=True)
         self._balance_completer = WordCompleter(["limit", "paper"], ignore_case=True)
         self._history_completer = WordCompleter(["--days", "--verbose", "--precision"], ignore_case=True)
@@ -153,10 +155,6 @@ class KairosCompleter(Completer):
         return "perpetual" in text_before_cursor or \
                any(x for x in ("derivative connector", "derivative name", "name of derivative", "name of the derivative")
                    if x in self.prompt_text.lower())
-
-    def _complete_connect_options(self, document: Document) -> bool:
-        text_before_cursor: str = document.text_before_cursor
-        return text_before_cursor.startswith("connect ")
 
     def _complete_exchange_amm_connectors(self, document: Document) -> bool:
         return "(Exchange/AMM)" in self.prompt_text
@@ -284,16 +282,12 @@ class KairosCompleter(Completer):
             for c in self._trading_timeframe_completer.get_completions(document, complete_event):
                 yield c
 
-        elif self._complete_connect_options(document):
-            for c in self._connect_option_completer.get_completions(document, complete_event):
-                yield c
-
         elif self._complete_export_options(document):
             for c in self._export_completer.get_completions(document, complete_event):
                 yield c
 
         elif self._complete_balance_limit_exchanges(document):
-            for c in self._connect_option_completer.get_completions(document, complete_event):
+            for c in self._exchange_name_completer.get_completions(document, complete_event):
                 yield c
 
         elif self._complete_balance_options(document):
@@ -353,6 +347,7 @@ class KairosCompleter(Completer):
             if complete_event.completion_requested or self._complete_subcommand(document):
                 for c in subcommand_completer.get_completions(document, complete_event):
                     yield c
+
 
 def load_completer(kairos_application):
     return KairosCompleter(kairos_application)

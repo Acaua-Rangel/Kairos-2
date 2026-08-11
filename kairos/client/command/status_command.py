@@ -12,7 +12,6 @@ from kairos.client.config.config_helpers import (
     get_strategy_config_map,
     missing_required_configs_legacy,
 )
-from kairos.client.config.security import Security
 from kairos.client.settings import required_exchanges
 from kairos.connector.connector_base import ConnectorBase
 from kairos.core.network_iterator import NetworkStatus
@@ -137,10 +136,6 @@ class StatusCommand:
         self.notify("\nPreliminary checks:")
         if self.trading_core.strategy_name is None or self.strategy_file_name is None:
             self.notify('  - Strategy check: Please import or create a strategy.')
-            return False
-
-        if not Security.is_decryption_done():
-            self.notify('  - Security check: Encrypted files are being processed. Please wait and try again later.')
             return False
 
         missing_configs = self.missing_configurations_legacy()

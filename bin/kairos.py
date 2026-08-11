@@ -7,19 +7,14 @@ from weakref import ReferenceType, ref
 import path_util  # noqa: F401
 
 from kairos import chdir_to_data_directory, init_logging
-from kairos.client.config.client_config_map import ClientConfigMap
-from kairos.client.config.config_crypt import ETHKeyFileSecretManger
 from kairos.client.config.config_helpers import (
     ClientConfigAdapter,
     create_yml_files_legacy,
     load_client_config_map_from_file,
     write_config_to_yml,
 )
-from kairos.client.config.security import Security
 from kairos.client.kairos_application import KairosApplication
 from kairos.client.settings import AllConnectorSettings
-from kairos.client.ui import login_prompt
-from kairos.client.ui.style import load_style
 from kairos.core.event.event_listener import EventListener
 from kairos.core.event.events import KairosUIEvent
 from kairos.core.utils import detect_available_port
@@ -53,7 +48,6 @@ class UIStartListener(EventListener):
 
 
 async def main_async(client_config_map: ClientConfigAdapter):
-    await Security.wait_til_decryption_done()
     await create_yml_files_legacy()
 
     init_logging("kairos_logs.yml", client_config_map)
@@ -81,7 +75,6 @@ async def main_async(client_config_map: ClientConfigAdapter):
 
 def main():
     chdir_to_data_directory()
-    secrets_manager_cls = ETHKeyFileSecretManger
 
     try:
         ev_loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
@@ -89,13 +82,8 @@ def main():
         ev_loop: asyncio.AbstractEventLoop = asyncio.new_event_loop()
         asyncio.set_event_loop(ev_loop)
 
-    # We need to load a default style for the login screen because the password is required to load the
-    # real configuration now that it can include secret parameters
-    style = load_style(ClientConfigAdapter(ClientConfigMap()))
-
-    if login_prompt(secrets_manager_cls, style=style):
-        client_config_map = load_client_config_map_from_file()
-        ev_loop.run_until_complete(main_async(client_config_map))
+    client_config_map = load_client_config_map_from_file()
+    ev_loop.run_until_complete(main_async(client_config_map))
 
 
 if __name__ == "__main__":

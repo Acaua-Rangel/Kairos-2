@@ -55,7 +55,6 @@ class AutofixPermissionsTest(unittest.TestCase):
         os_mock.setuid.assert_called_once_with(1234)
 
 
-
 class LoadAndStartStrategyV2Test(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self._tmp = TemporaryDirectory()
@@ -166,18 +165,14 @@ class LoadAndStartStrategyV1Test(unittest.IsolatedAsyncioTestCase):
 
 
 class BootstrapApplicationTest(unittest.IsolatedAsyncioTestCase):
-    """All deferred imports (init_logging, yml helpers, Security) are patched at their source
-    modules; no real login, decryption, file writes, or logging re-init happens."""
+    """All deferred imports (init_logging, yml helpers) are patched at their source modules; no
+    real file writes or logging re-init happens."""
 
-    def _patches(self, login_ok=True):
-        security = MagicMock()
-        security.login.return_value = login_ok
-        security.wait_til_decryption_done = AsyncMock()
+    def _patches(self):
         return (
             patch("kairos.init_logging"),
             patch("kairos.client.config.config_helpers.create_yml_files_legacy", new=AsyncMock()),
             patch("kairos.client.config.config_helpers.read_system_configs_from_yml", new=AsyncMock()),
-            patch("kairos.client.config.security.Security", security),
             patch.object(runner, "silence_console_handlers"),
             patch.object(runner.AllConnectorSettings, "initialize_paper_trade_settings"),
             patch.object(runner.KairosApplication, "main_application"),
@@ -188,22 +183,13 @@ class BootstrapApplicationTest(unittest.IsolatedAsyncioTestCase):
         config_map.mqtt_bridge.mqtt_autostart = False
         return config_map
 
-    async def test_bad_password_returns_none(self):
-        patches = self._patches(login_ok=False)
-        config_map = self._make_config_map()
-        with patches[0] as init_logging, patches[1], patches[2], patches[3], \
-                patches[4], patches[5], patches[6]:
-            app = await runner.bootstrap_application(config_map, MagicMock())
-        self.assertIsNone(app)
-        init_logging.assert_not_called()
-
     async def test_default_boot_sequence(self):
         patches = self._patches()
         config_map = self._make_config_map()
         with patches[0] as init_logging, patches[1] as create_yml, patches[2] as read_configs, \
-                patches[3], patches[4] as silence, patches[5] as init_paper, patches[6] as main_app:
+                patches[3] as silence, patches[4] as init_paper, patches[5] as main_app:
             app = await runner.bootstrap_application(
-                config_map, MagicMock(), strategy_file_name="mybot", override_log_level="DEBUG")
+                config_map, strategy_file_name="mybot", override_log_level="DEBUG")
         self.assertIs(app, main_app.return_value)
         init_logging.assert_called_once_with(
             "kairos_logs.yml", config_map, override_log_level="DEBUG", strategy_file_path="mybot")
@@ -217,10 +203,10 @@ class BootstrapApplicationTest(unittest.IsolatedAsyncioTestCase):
     async def test_headless_silenced_mqtt_boot(self):
         patches = self._patches()
         config_map = self._make_config_map()
-        with patches[0], patches[1], patches[2], patches[3], \
-                patches[4] as silence, patches[5], patches[6] as main_app:
+        with patches[0], patches[1], patches[2], \
+                patches[3] as silence, patches[4], patches[5] as main_app:
             app = await runner.bootstrap_application(
-                config_map, MagicMock(), headless=True, mqtt_autostart=True, silence_console=True)
+                config_map, headless=True, mqtt_autostart=True, silence_console=True)
         self.assertIs(app, main_app.return_value)
         silence.assert_called_once()
         self.assertTrue(config_map.mqtt_bridge.mqtt_autostart)

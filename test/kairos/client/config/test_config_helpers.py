@@ -9,8 +9,7 @@ from pydantic import Field, SecretStr
 
 from kairos.client.config import config_helpers
 from kairos.client.config.client_config_map import ClientConfigMap
-from kairos.client.config.config_crypt import ETHKeyFileSecretManger
-from kairos.client.config.config_data_types import BaseClientModel, BaseConnectorConfigMap
+from kairos.client.config.config_data_types import BaseConnectorConfigMap
 from kairos.client.config.config_helpers import (
     ClientConfigAdapter,
     ReadOnlyClientConfigAdapter,
@@ -19,7 +18,6 @@ from kairos.client.config.config_helpers import (
     load_connector_config_map_from_file,
     save_to_yml,
 )
-from kairos.client.config.security import Security
 from kairos.client.config.strategy_config_data_types import BaseStrategyConfigMap
 from kairos.strategy.avellaneda_market_making.avellaneda_market_making_config_map_pydantic import (
     AvellanedaMarketMakingConfigMap,
@@ -81,8 +79,6 @@ strategy: pure_market_making
             connector: str = "binance"
             secret_attr: Optional[SecretStr] = Field(default=None, json_schema_extra={"is_secure": True, "is_connect_key": True})
 
-        password = "some-pass"
-        Security.secrets_manager = ETHKeyFileSecretManger(password)
         cm = ClientConfigAdapter(DummyConnectorModel(secret_attr="some_secret"))
         get_connector_config_keys_mock.return_value = DummyConnectorModel()
         with TemporaryDirectory() as d:
@@ -93,31 +89,6 @@ strategy: pure_market_making
             cm_loaded = load_connector_config_map_from_file(temp_file_name)
 
         self.assertEqual(cm, cm_loaded)
-
-    def test_decrypt_config_map_secret_values(self):
-        class DummySubModel(BaseClientModel):
-            secret_attr: SecretStr
-
-            class Config:
-                title = "dummy_sub_model"
-
-        class DummyModel(BaseClientModel):
-            sub_model: DummySubModel
-
-            class Config:
-                title = "dummy_model"
-
-        Security.secrets_manager = ETHKeyFileSecretManger(password="some-password")
-        secret_value = "some_secret"
-        encrypted_secret_value = Security.secrets_manager.encrypt_secret_value("secret_attr", secret_value)
-        sub_model = DummySubModel(secret_attr=encrypted_secret_value)
-        instance = ClientConfigAdapter(DummyModel(sub_model=sub_model))
-
-        self.assertEqual(encrypted_secret_value, instance.sub_model.secret_attr.get_secret_value())
-
-        instance._decrypt_all_internal_secrets()
-
-        self.assertEqual(secret_value, instance.sub_model.secret_attr.get_secret_value())
 
 
 class ReadOnlyClientAdapterTest(unittest.TestCase):

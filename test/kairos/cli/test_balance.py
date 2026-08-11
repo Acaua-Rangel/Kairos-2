@@ -58,13 +58,14 @@ class BalanceRenderTest(unittest.TestCase):
 
 
 class BalanceCommandTest(unittest.TestCase):
-    """End-to-end runs of the `balance` command with login / UserBalances / RateOracle faked."""
+    """End-to-end runs of the `balance` command with client config / UserBalances / RateOracle faked."""
 
     def setUp(self) -> None:
         self.ccm = SimpleNamespace(
             global_token=SimpleNamespace(global_token_symbol="$"),
             commands_timeout=SimpleNamespace(other_commands_timeout=1))
-        patch("kairos.cli.commands.balance.login", return_value=(self.ccm, "pw")).start()
+        patch("kairos.client.config.config_helpers.load_client_config_map_from_file",
+              return_value=self.ccm).start()
 
         self.conn = Mock()
         acs = patch("kairos.client.settings.AllConnectorSettings").start()
@@ -103,13 +104,13 @@ class BalanceCommandTest(unittest.TestCase):
     def _run(self, connector=None, units_only=False, as_json=False) -> str:
         buf = io.StringIO()
         with redirect_stdout(buf):
-            balance(connector, units_only, False, as_json)
+            balance(connector, units_only, as_json)
         return buf.getvalue()
 
     def _fail(self, connector=None, units_only=False, as_json=False) -> int:
         with redirect_stdout(io.StringIO()):
             with self.assertRaises(typer.Exit) as ctx:
-                balance(connector, units_only, False, as_json)
+                balance(connector, units_only, as_json)
         return ctx.exception.exit_code
 
     # -- all connectors --
@@ -165,7 +166,6 @@ class BalanceCommandTest(unittest.TestCase):
     def test_all_network_timeout(self):
         self.ub.all_balances_all_exchanges = AsyncMock(side_effect=asyncio.TimeoutError)
         self.assertEqual(self._fail(), int(ExitCode.TIMEOUT))
-
 
     def test_json_without_positions_omits_position_fields(self):
         self.ub._markets = {}

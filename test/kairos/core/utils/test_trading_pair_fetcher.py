@@ -10,7 +10,6 @@ from aioresponses import aioresponses
 from kairos.client.config.client_config_map import ClientConfigMap
 from kairos.client.config.config_helpers import ClientConfigAdapter
 from kairos.client.config.config_var import ConfigVar
-from kairos.client.config.security import Security
 from kairos.client.settings import ConnectorSetting, ConnectorType
 from kairos.connector.exchange.binance import binance_constants as CONSTANTS, binance_web_utils
 from kairos.core.data_type.trade_fee import TradeFeeSchema
@@ -18,11 +17,6 @@ from kairos.core.utils.trading_pair_fetcher import TradingPairFetcher
 
 
 class TestTradingPairFetcher(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        super().setUpClass()
-        Security.decrypt_all()
-
     @classmethod
     async def wait_until_trading_pair_fetcher_ready(cls, tpf):
         while True:
@@ -103,9 +97,7 @@ class TestTradingPairFetcher(unittest.TestCase):
 
     @patch("kairos.core.utils.trading_pair_fetcher.TradingPairFetcher._all_connector_settings")
     @patch("kairos.core.utils.trading_pair_fetcher.TradingPairFetcher._sf_shared_instance")
-    @patch("kairos.client.config.security.Security.connector_config_file_exists")
-    @patch("kairos.client.config.security.Security.wait_til_decryption_done")
-    def test_fetched_connected_trading_pairs(self, _, __: MagicMock, ___: AsyncMock, mock_connector_settings):
+    def test_fetched_connected_trading_pairs(self, _, mock_connector_settings):
         connector = AsyncMock()
         connector.all_trading_pairs.return_value = ["MOCK-HBOT"]
         mock_connector_settings.return_value = {
@@ -115,7 +107,6 @@ class TestTradingPairFetcher(unittest.TestCase):
 
         client_config_map = ClientConfigAdapter(ClientConfigMap())
         client_config_map.fetch_pairs_from_all_exchanges = False
-        self.assertTrue(Security.connector_config_file_exists("binance"))
         trading_pair_fetcher = TradingPairFetcher(client_config_map)
         self.async_run_with_timeout(self.wait_until_trading_pair_fetcher_ready(trading_pair_fetcher), 1.0)
         trading_pairs = trading_pair_fetcher.trading_pairs

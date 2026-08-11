@@ -71,8 +71,6 @@ class LaunchTest(unittest.TestCase):
         self.write_loaded = self.stack.enter_context(patch.object(bot, "write_loaded"))
         self.write_meta = self.stack.enter_context(patch.object(bot, "write_meta"))
         self.stack.enter_context(patch.object(bot, "running", return_value=False))
-        self.login = self.stack.enter_context(
-            patch("kairos.cli.commands.start.login", return_value=("keystore", "pw")))
         self.spawn = self.stack.enter_context(
             patch("kairos.cli.commands.start._spawn_detached",
                   return_value={"name": "n", "pid": 1, "status": "running"}))
@@ -84,7 +82,7 @@ class LaunchTest(unittest.TestCase):
         cmd, env, name, timeout = self.spawn.call_args.args
         self.assertEqual(cmd, [sys.executable, "-m", "kairos.cli.engine",
                                "--name", "conf_v1", "--config", "conf_v1.yml"])
-        self.assertEqual(env["HBOT_PASSWORD"], "pw")
+        self.assertIsInstance(env, dict)
         self.assertEqual((name, timeout), ("conf_v1", 120.0))
         self.assertEqual(record, self.spawn.return_value)
         self.write_loaded.assert_called_once_with("conf_v1.yml", "v1-strategy")
@@ -129,11 +127,6 @@ class LaunchTest(unittest.TestCase):
         cmd = self.spawn.call_args.args[0]
         self.assertIn("--auto-set-permissions", cmd)
         self.assertIn("hbot:hbot", cmd)
-
-    def test_password_stdin_is_forwarded_to_login(self):
-        with patch.object(sc, "resolve_config_type", return_value="v2-script"):
-            start_mod.launch(file="conf_pmm.yml", password_stdin=True)
-        self.login.assert_called_once_with(password_stdin=True)
 
     def test_no_file_and_nothing_loaded_fails(self):
         with patch.object(bot, "read_loaded", return_value=None):
@@ -192,7 +185,7 @@ class LaunchTest(unittest.TestCase):
         exec_python, exec_cmd, exec_env = fake_os.execve.call_args.args
         self.assertEqual(exec_python, sys.executable)
         self.assertEqual(exec_cmd[:3], [sys.executable, "-m", "kairos.cli.engine"])
-        self.assertEqual(exec_env, {"PATH": "/bin", "HBOT_PASSWORD": "pw"})
+        self.assertEqual(exec_env, {"PATH": "/bin"})
 
 
 class SpawnDetachedTest(unittest.TestCase):
@@ -262,7 +255,7 @@ class StartCommandTest(unittest.TestCase):
         with patch("kairos.cli.commands.start.launch", return_value=dict(self.RECORD)) as launch, \
                 redirect_stdout(buf):
             start_mod.start(file="conf_pmm.yml", v1=False, v2=True, controller=False, replace=True,
-                            foreground=False, password_stdin=False, auto_set_permissions=None,
+                            foreground=False, auto_set_permissions=None,
                             timeout=9.0, as_json=as_json)
         return launch, buf.getvalue()
 
@@ -270,7 +263,7 @@ class StartCommandTest(unittest.TestCase):
         launch, out = self._run(as_json=True)
         self.assertEqual(json.loads(out), self.RECORD)
         launch.assert_called_once_with(file="conf_pmm.yml", v1=False, v2=True, controller=False,
-                                       replace=True, foreground=False, password_stdin=False,
+                                       replace=True, foreground=False,
                                        auto_set_permissions=None, timeout=9.0)
 
     def test_default_output_is_markdown_kv(self):

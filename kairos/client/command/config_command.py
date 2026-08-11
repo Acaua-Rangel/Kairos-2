@@ -13,7 +13,6 @@ from kairos.client.config.config_helpers import (
 )
 from kairos.client.config.config_validators import validate_bool, validate_decimal
 from kairos.client.config.config_var import ConfigVar
-from kairos.client.config.security import Security
 from kairos.client.config.strategy_config_data_types import BaseTradingStrategyConfigMap
 from kairos.client.settings import CLIENT_CONFIG_PATH, STRATEGIES_CONF_DIR_PATH
 from kairos.client.ui.interface_utils import format_df_for_printout
@@ -194,15 +193,6 @@ class ConfigCommand:
                 keys.extend(
                     [c.key for c in self.strategy_config_map.values() if c.prompt is not None and c.key != 'strategy'])
         return keys
-
-    async def check_password(self,  # type: KairosApplication
-                             ):
-        password = await self.app.prompt(prompt="Enter your password >>> ", is_password=True)
-        if password != Security.secrets_manager.password.get_secret_value():
-            self.notify("Invalid password, please try again.")
-            return False
-        else:
-            return True
 
     # Make this function static so unit testing can be performed.
     @staticmethod

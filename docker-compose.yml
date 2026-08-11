@@ -33,5 +33,6 @@ services:
     #   command: tail -f /dev/null
     # Or make one dedicated bot the container's main process:
     #   command: hbot start <config> --foreground
-  #  environment:
-  #    - HBOT_PASSWORD=admin
+    # Binance API keys (BINANCE_API_KEY / BINANCE_API_SECRET) — copy .env.example to .env and
+    # uncomment to pass it into the container. Not needed for paper trading.
+  #  env_file: ./.env

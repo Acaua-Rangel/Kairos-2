@@ -15,7 +15,7 @@ from kairos.cli.output import ExitCode
 
 def run_deploy(target, **kwargs):
     params = dict(set_values=None, values_stdin=False, name=None, v1=False, v2=False,
-                  controller=False, replace=False, foreground=False, password_stdin=False,
+                  controller=False, replace=False, foreground=False,
                   timeout=1.0, as_json=False)
     params.update(kwargs)
     return deploy(target=target, **params)
@@ -84,7 +84,7 @@ class DeployCommandTest(unittest.TestCase):
         self.assertIn("a: 5", path.read_text())  # comment-preserving edit applied
         self.write_loaded.assert_called_once_with("conf_x.yml", "v2-script")
         self.launch.assert_called_once_with(file="conf_x.yml", v1=False, v2=True, controller=False,
-                                            replace=True, foreground=False, password_stdin=False,
+                                            replace=True, foreground=False,
                                             timeout=7.0)
         text = out.getvalue()
         self.assertIn("deployed conf_x.yml", text)
@@ -153,7 +153,7 @@ class DeployCommandTest(unittest.TestCase):
                 run_deploy("conf_c.yml")
         validate.assert_called_once_with(path)
         self.launch.assert_called_once_with(file="conf_c.yml", v1=False, v2=False, controller=True,
-                                            replace=False, foreground=False, password_stdin=False,
+                                            replace=False, foreground=False,
                                             timeout=1.0)
 
     def test_broken_controller_fails_before_launch(self):
@@ -174,13 +174,12 @@ class DeployCommandTest(unittest.TestCase):
                    return_value=("strategy", "pmm_simple", None)), \
                 patch("kairos.cli.commands.create.create_config", return_value=created) as cc:
             with redirect_stdout(out):
-                run_deploy("pmm_simple", set_values=["a=1", "b=2"], controller=True,
-                           password_stdin=True)
+                run_deploy("pmm_simple", set_values=["a=1", "b=2"], controller=True)
         cc.assert_called_once_with(strategy="pmm_simple", set_values=["a=1", "b=2"],
                                    values_stdin=False, with_defaults=False, name=None,
                                    v1=False, v2=False, controller=True)
         self.launch.assert_called_once_with(file="conf_pmm.yml", v1=False, v2=False, controller=True,
-                                            replace=False, foreground=False, password_stdin=True,
+                                            replace=False, foreground=False,
                                             timeout=1.0)
         text = out.getvalue()
         self.assertIn("deployed conf_pmm.yml", text)

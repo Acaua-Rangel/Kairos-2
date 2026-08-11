@@ -1,9 +1,8 @@
-"""``hbot balance`` — fetch balances from connectors connected via `hbot connect`.
+"""``hbot balance`` — fetch balances from connectors with keys set in `.env`.
 
-Typically run right after `hbot connect <connector>` to confirm the keys work and see funds.
-Decrypts the stored keys with the keystore password, queries each connector (network), and reports
-balances per connector with their global-token (USD) value, mirroring Kairos-2's ``balance`` command.
-Read-only — it never places orders.
+Reads Binance credentials from BINANCE_API_KEY/BINANCE_API_SECRET, queries each connector
+(network), and reports balances per connector with their global-token (USD) value, mirroring
+Kairos-2's ``balance`` command. Read-only — it never places orders.
 """
 import asyncio
 from decimal import Decimal
@@ -12,7 +11,6 @@ from typing import Dict, List, Optional, Tuple
 import typer
 
 from kairos.cli.output import ExitCode, echo, emit, fail, json_option, render_table
-from kairos.cli.password import login
 
 
 async def _all_prices() -> Tuple[Dict[str, Decimal], str]:
@@ -172,13 +170,12 @@ def balance(
     connector: Optional[str] = typer.Argument(None, help="Connector to fetch. Omit for all connected connectors."),
     units_only: bool = typer.Option(
         False, "--units-only", help="Show only token amounts — skip the price fetch (faster) and USD values/positions."),
-    password_stdin: bool = typer.Option(
-        False, "--password-stdin", help="Read the keystore password from stdin (else $HBOT_PASSWORD or a prompt)."),
     as_json: bool = json_option(),
 ) -> None:
     """Show your connector balances, with their value in USD."""
+    from kairos.client.config.config_helpers import load_client_config_map_from_file
     from kairos.client.settings import AllConnectorSettings
-    ccm, password = login(password_stdin=password_stdin)
+    ccm = load_client_config_map_from_file()
 
     sym = ccm.global_token.global_token_symbol
     timeout = float(ccm.commands_timeout.other_commands_timeout)

@@ -36,20 +36,17 @@ class CreateCommandTest(IsolatedAsyncioWrapperTestCase):
 
     @patch("shutil.copy")
     @patch("kairos.client.command.create_command.save_to_yml_legacy")
-    @patch("kairos.client.config.security.Security.is_decryption_done")
     @patch("kairos.client.command.status_command.StatusCommand.validate_required_connections")
     @patch("kairos.core.utils.market_price.get_last_price")
     async def test_prompt_for_configuration_re_prompts_on_lower_than_minimum_amount(
         self,
         get_last_price_mock: AsyncMock,
         validate_required_connections_mock: AsyncMock,
-        is_decryption_done_mock: MagicMock,
         save_to_yml_mock: MagicMock,
         _: MagicMock,
     ):
         get_last_price_mock.return_value = Decimal("11")
         validate_required_connections_mock.return_value = {}
-        is_decryption_done_mock.return_value = True
         config_maps = []
         save_to_yml_mock.side_effect = lambda _, cm: config_maps.append(cm)
 
@@ -77,20 +74,17 @@ class CreateCommandTest(IsolatedAsyncioWrapperTestCase):
 
     @patch("shutil.copy")
     @patch("kairos.client.command.create_command.save_to_yml_legacy")
-    @patch("kairos.client.config.security.Security.is_decryption_done")
     @patch("kairos.client.command.status_command.StatusCommand.validate_required_connections")
     @patch("kairos.core.utils.market_price.get_last_price")
     async def test_prompt_for_configuration_accepts_zero_amount_on_get_last_price_network_timeout(
         self,
         get_last_price_mock: AsyncMock,
         validate_required_connections_mock: AsyncMock,
-        is_decryption_done_mock: MagicMock,
         save_to_yml_mock: MagicMock,
         _: MagicMock,
     ):
         get_last_price_mock.side_effect = self.get_async_sleep_fn(delay=0.02)
         validate_required_connections_mock.return_value = {}
-        is_decryption_done_mock.return_value = True
         config_maps = []
         save_to_yml_mock.side_effect = lambda _, cm: config_maps.append(cm)
 
@@ -153,20 +147,17 @@ class CreateCommandTest(IsolatedAsyncioWrapperTestCase):
 
     @patch("shutil.copy")
     @patch("kairos.client.command.create_command.save_to_yml_legacy")
-    @patch("kairos.client.config.security.Security.is_decryption_done")
     @patch("kairos.client.command.status_command.StatusCommand.validate_required_connections")
     @patch("kairos.core.utils.market_price.get_last_price")
     async def test_prompt_for_configuration_handles_status_network_timeout(
         self,
         get_last_price_mock: AsyncMock,
         validate_required_connections_mock: AsyncMock,
-        is_decryption_done_mock: MagicMock,
         _: MagicMock,
         __: MagicMock,
     ):
         get_last_price_mock.return_value = None
         validate_required_connections_mock.side_effect = self.get_async_sleep_fn(delay=0.05)
-        is_decryption_done_mock.return_value = True
         strategy_file_name = "some-strategy.yml"
         self.cli_mock_assistant.queue_prompt_reply("pure_market_making")  # strategy
         self.cli_mock_assistant.queue_prompt_reply("binance")  # spot connector

@@ -56,8 +56,7 @@ The v1 surface mirrors the interactive Kairos-2 client's commands. Flat
 ```
 hbot
 │
-├─ ── set up (connectors & funds) ──
-│  ├─ connect [connector]        show connections, or add a connector's API keys
+├─ ── set up (funds) ──
 │  └─ balance [connector]        balances + USD value (perps: positions + net value)
 │
 ├─ ── create, load & configure ──
@@ -74,15 +73,15 @@ hbot
    ├─ status                     run state, live status, recent errors
    ├─ logs [name]                tail the log (-f to follow)
    ├─ history [name]             PnL, fees, volume per market
-   ├─ doctor                     health check: keystore, clock skew, disk, stale state (exit 0 = healthy)
+   ├─ doctor                     health check: credentials, clock skew, disk, stale state (exit 0 = healthy)
    └─ update                     update hbot itself to the branch's latest (--check to preview)
 ```
 
 `doctor` runs the checks whose failures otherwise surface one at a time as confusing runtime
-errors: install/extensions sanity, keystore unlockable (when `HBOT_PASSWORD` is set), **clock
-skew** vs internet time (signed exchange requests reject drifted clocks), free disk for the
-trades DB and logs, stale `bot.pid`, and a dangling loaded-config pointer. Any `fail` row
-exits 1; warns are advisories and exit 0.
+errors: install/extensions sanity, missing Binance credentials in `.env`, **clock skew** vs
+internet time (signed exchange requests reject drifted clocks), free disk for the trades DB and
+logs, stale `bot.pid`, and a dangling loaded-config pointer. Any `fail` row exits 1; warns are
+advisories and exit 0.
 
 `update` updates **the software**, per install type: a source checkout fast-forwards its branch
 and rebuilds the Cython extensions only when compiled sources changed; inside a container it fails
@@ -98,9 +97,7 @@ See [Roadmap](#roadmap) for commands intentionally left out of v1 (`ticker`, `ra
 ## Walkthrough
 
 ```bash
-# 1. connect a connector (keys are encrypted with your keystore password)
-hbot connect binance_perpetual --fields          # what keys does it need?
-hbot connect binance_perpetual                   # add the keys
+# 1. set your Binance API keys in .env (cp .env.example .env, then fill it in)
 hbot balance                                          # confirm funds
 
 # 2. create a strategy config (agents: fill required fields in one shot)
@@ -152,7 +149,7 @@ hbot deploy pmm_simple --set connector_name=binance_perpetual --set trading_pair
 The target is resolved config-file-first (config names are unique across types); anything else must
 be a creatable strategy name, with every required field supplied via `--set` / `--values-stdin`
 (deploy's contract is a *running* bot, so there is no `--with-defaults`). `--replace`,
-`--foreground`, `--password-stdin`, `--timeout`, and `--json` behave exactly as on `start`.
+`--foreground`, `--timeout`, and `--json` behave exactly as on `start`.
 
 ---
 
@@ -183,11 +180,11 @@ return in later versions:
 | config `list` / `show` | list creatable strategies; preview a strategy's fields | `create <strategy>` (missing-required error lists fields); `create --with-defaults` + `config` reveals them all |
 | config `clone <config>` | copy a config to a new name, tweak fields | `create` a fresh one, or copy the `.yml` by hand |
 | `positions <connector>` | open perp positions, standalone | shown inline under `balance` for perp connectors |
-| `ticker <connector> <pair>` | best bid/ask/mid + last price | the exchange's public API (no keystore needed); a running bot's prices show under `status` |
+| `ticker <connector> <pair>` | best bid/ask/mid + last price | the exchange's public API; a running bot's prices show under `status` |
 | `rate <pair>` | rate-oracle conversion rate | the oracle still runs inside the engine; for a spot price use public data |
 | `rules <connector> <pair>` | trading rules (min size/notional, tick/step) | — |
 | `book <connector> <pair>` | order-book depth | the exchange's public API |
-| `connectors` | list available connectors | `connect` with no argument lists connections |
+| `connectors` | list available connectors | `hbot doctor` reports whether Binance credentials are set |
 | `trades [name]` | recorded fills table | `history` for PnL/fees/volume |
 
 Removing these is not a capability loss in the engine — only in the CLI surface — and each is tracked
@@ -200,7 +197,6 @@ Commands the interactive client never had, aimed at first-run experience and ope
 | proposed | what it would do | why |
 |---|---|---|
 | `bots` | list past/stopped bot runs (name, config, last run, quick PnL) | `logs`/`history <name>` already work by name, but nothing *lists* the names |
-| `connect --remove <connector>` | delete a connector's stored keys | key rotation/off-boarding currently means editing encrypted files by hand |
 | `start --paper` | run any config against paper-trade connectors | try a strategy with zero risk before funding it |
 | `backtest <config>` | run a controller config through the backtesting engine, report the same PnL table as `history` | the engine ships a backtester; the CLI can't reach it |
 | `status --watch` | re-render status every few seconds until interrupted (like `logs -f`) | agents poll; humans want a live panel without the interactive client |
@@ -224,19 +220,15 @@ the **exit code** — branch on it, not on the text:
 | 1 | ERROR | generic failure |
 | 2 | NOT_FOUND | the bot/config/file doesn't exist |
 | 3 | NOT_RUNNING | the bot exists but its process isn't alive |
-| 4 | CONFIG_ERROR | bad/missing config, value, or password |
+| 4 | CONFIG_ERROR | bad/missing config or value |
 | 5 | TIMEOUT | operation didn't finish in time |
 
-## Passwords & secrets
+## Credentials
 
-The keystore password unlocks your encrypted keys. Provide it without a prompt, and **never on
-argv**: set `HBOT_PASSWORD` in the environment, or pipe it with `--password-stdin`
-(`printf '%s' "$PW" | hbot start conf_eth.yml --password-stdin`). A missing/wrong password fails fast
-with exit code 4 — commands never hang waiting for input.
-
-On a brand-new install there's no keystore yet — the **first** password you provide (the first time
-you run `hbot connect` / `balance` / `start`) becomes your keystore password, just like the
-interactive client's first launch. Every later command must use that same password.
+Binance API keys are read from a `.env` file at the repo root — copy `.env.example` to `.env` and
+fill in `BINANCE_API_KEY` / `BINANCE_API_SECRET` (used for both `binance` and `binance_perpetual`).
+Not needed for `binance_paper_trade`. `hbot doctor` reports whether they're set; a live connector
+started without them fails fast with exit code 4.
 
 ---
 
@@ -260,8 +252,8 @@ one line in `docker-compose.yml`:
 make deploy        # start the container (an idle hbot host)
 make link-cli      # install the host `hbot` command (-> podman exec into the container)
 
-hbot connect binance              # exactly the same commands as a source install
-hbot import conf_my_bot.yml       # load a config you've placed in conf/
+hbot import conf_my_bot.yml       # load a config you've placed in conf/ (set BINANCE_API_KEY/
+                                   # BINANCE_API_SECRET in .env first for live connectors)
 hbot start conf_my_bot.yml
 hbot status ; hbot logs -f ; hbot stop
 ```
@@ -289,7 +281,7 @@ gracefully (cancelling orders):
 services:
   bot:
     image: kairos-2
-    environment: [HBOT_PASSWORD]
+    environment: [BINANCE_API_KEY, BINANCE_API_SECRET]
     volumes:
       - ./conf:/home/kairos/conf
       - ./data:/home/kairos/data

@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 
 from kairos.client.config.client_config_map import ClientConfigMap
 from kairos.client.config.config_helpers import get_connector_class
-from kairos.client.config.security import Security
+from kairos.client.config.env_credentials import env_api_keys
 from kairos.client.settings import AllConnectorSettings
 from kairos.core.utils.async_utils import safe_gather
 from kairos.core.utils.market_price import get_last_price
@@ -65,8 +65,7 @@ class UserBalances:
         if exchange_name in self._markets:
             return await self._update_balances(self._markets[exchange_name])
         else:
-            await Security.wait_til_decryption_done()
-            api_keys = Security.api_keys(exchange_name)
+            api_keys = env_api_keys(exchange_name) or {}
             return await self.add_exchange(exchange_name, client_config_map, **api_keys)
 
     # returns error message for each exchange

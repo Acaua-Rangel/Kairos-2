@@ -68,15 +68,16 @@ hbot stop
 
 ### Live trading
 
+Binance API keys are read from a `.env` file at the repo root:
+
 ```bash
-hbot connect binance                                   # store API keys (encrypted at rest)
+cp .env.example .env
+# edit .env and fill in BINANCE_API_KEY / BINANCE_API_SECRET
+
 hbot create pmm_simple --name conf_my_bot.yml \
      --set connector_name=binance --set trading_pair=BTC-USDT --set total_amount_quote=100
 hbot start conf_my_bot.yml
 ```
-
-On first use `hbot` prompts for a keystore password that encrypts your API keys. Set
-`HBOT_PASSWORD` or pass `--password-stdin` to run non-interactively.
 
 Full command reference: **[hbot CLI guide](kairos/cli/README.md)**.
 

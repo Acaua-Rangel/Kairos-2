@@ -6,9 +6,8 @@ Checks never crash the command: an unexpected exception becomes that check's ``f
 
 The checks are the failure modes that otherwise surface one at a time as confusing runtime
 errors: a drifted clock silently rejecting signed exchange requests, a stale pidfile making
-``stop`` wait its full timeout, a dangling loaded-config pointer, a keystore password that
-doesn't unlock, missing compiled extensions after a bad build, a disk filling up under the
-trades DB.
+``stop`` wait its full timeout, a dangling loaded-config pointer, missing Binance credentials in
+``.env``, missing compiled extensions after a bad build, a disk filling up under the trades DB.
 """
 import os
 import shutil
@@ -55,17 +54,17 @@ def _extensions_row() -> dict:
                     f"compiled extensions missing/broken ({e}) — run `hbot update` or `make install`")
 
 
-def _keystore_row() -> dict:
-    from kairos.client.config.security import Security
-    if Security.new_password_required():
-        return _row("keystore", "ok", "none yet — the first password you use creates it")
-    password = os.environ.get("HBOT_PASSWORD") or os.environ.get("CONFIG_PASSWORD")
-    if not password:
-        return _row("keystore", "skip", "exists; set HBOT_PASSWORD to verify it unlocks")
-    from kairos.client.config.config_crypt import ETHKeyFileSecretManger
-    if Security.login(ETHKeyFileSecretManger(password)):
-        return _row("keystore", "ok", "password unlocks the keystore")
-    return _row("keystore", "fail", "the provided password does NOT unlock the keystore")
+def _credentials_row() -> dict:
+    has_key = bool(os.environ.get("BINANCE_API_KEY"))
+    has_secret = bool(os.environ.get("BINANCE_API_SECRET"))
+    if has_key and has_secret:
+        return _row("credentials", "ok", "BINANCE_API_KEY/BINANCE_API_SECRET are set")
+    if not has_key and not has_secret:
+        return _row("credentials", "warn",
+                    "BINANCE_API_KEY/BINANCE_API_SECRET not set — fine for paper trading, "
+                    "required for live connectors (see .env.example)")
+    return _row("credentials", "warn", "only one of BINANCE_API_KEY/BINANCE_API_SECRET is set — "
+                                       "live connectors need both (see .env.example)")
 
 
 def _remote_unix_time() -> Optional[float]:
@@ -147,7 +146,7 @@ def _loaded_row() -> dict:
 
 
 CHECKS: List[Callable[[], dict]] = [
-    _install_row, _extensions_row, _keystore_row, _clock_row,
+    _install_row, _extensions_row, _credentials_row, _clock_row,
     _disk_row, _bot_row, _loaded_row,
 ]
 

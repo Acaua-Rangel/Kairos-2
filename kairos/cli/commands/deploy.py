@@ -12,7 +12,7 @@ no new semantics, just one call instead of two:
 The target is resolved config-file-first: a name that matches an existing config in
 ``conf/strategies|scripts|controllers`` deploys that file; otherwise it must name a creatable
 strategy / controller / script. Everything else (readiness wait, --replace, --foreground,
-password handling, exit codes) is ``hbot start``'s behavior, unchanged.
+exit codes) is ``hbot start``'s behavior, unchanged.
 """
 from typing import List, Optional, Tuple
 
@@ -65,8 +65,6 @@ def deploy(
         False, "--replace", help="If a bot is already running, stop it first, then start this one."),
     foreground: bool = typer.Option(
         False, "--foreground", help="Run the bot in the foreground (use as a container's main process)."),
-    password_stdin: bool = typer.Option(
-        False, "--password-stdin", help="Read the keystore password from stdin (else $HBOT_PASSWORD or a prompt)."),
     timeout: float = typer.Option(120.0, "--timeout", help="Seconds to wait for the bot to start."),
     as_json: bool = json_option(),
 ) -> None:
@@ -119,7 +117,7 @@ def deploy(
     started = launch(file=config_record["file"], v1=config_record["type"] == "v1-strategy",
                      v2=config_record["type"] == "v2-script",
                      controller=config_record["type"] == "controller",
-                     replace=replace, foreground=foreground, password_stdin=password_stdin,
+                     replace=replace, foreground=foreground,
                      timeout=timeout)
 
     record = {**config_record, **started}

@@ -78,24 +78,25 @@ class DoctorRowTest(unittest.TestCase):
         (Path(d.name) / "conf_x.yml").write_text("a: 1\n")
         self.assertEqual(doctor_mod._loaded_row()["status"], "ok")
 
-    # -- keystore --
+    # -- credentials --
 
-    def test_keystore_without_password_skips(self):
+    def test_credentials_missing_both_warns(self):
         import os
-        patch("kairos.client.config.security.Security.new_password_required",
-              return_value=False).start()
-        env = {k: v for k, v in os.environ.items() if k not in ("HBOT_PASSWORD", "CONFIG_PASSWORD")}
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("BINANCE_API_KEY", "BINANCE_API_SECRET")}
         with patch.dict(os.environ, env, clear=True):
-            row = doctor_mod._keystore_row()
-        self.assertEqual(row["status"], "skip")
+            row = doctor_mod._credentials_row()
+        self.assertEqual(row["status"], "warn")
 
-    def test_keystore_bad_password_fails(self):
-        patch("kairos.client.config.security.Security.new_password_required",
-              return_value=False).start()
-        patch("kairos.client.config.security.Security.login", return_value=False).start()
-        with patch.dict("os.environ", {"HBOT_PASSWORD": "wrong"}):
-            row = doctor_mod._keystore_row()
-        self.assertEqual(row["status"], "fail")
+    def test_credentials_only_one_set_warns(self):
+        with patch.dict("os.environ", {"BINANCE_API_KEY": "k"}, clear=True):
+            row = doctor_mod._credentials_row()
+        self.assertEqual(row["status"], "warn")
+
+    def test_credentials_both_set_ok(self):
+        with patch.dict("os.environ", {"BINANCE_API_KEY": "k", "BINANCE_API_SECRET": "s"}):
+            row = doctor_mod._credentials_row()
+        self.assertEqual(row["status"], "ok")
 
 
 class DoctorRunTest(unittest.TestCase):

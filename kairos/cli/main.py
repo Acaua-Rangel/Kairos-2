@@ -13,7 +13,6 @@ import typer
 from kairos.cli.commands import (
     balance as balance_cmd,
     config as config_cmd,
-    connect as connect_cmd,
     create as create_cmd,
     deploy as deploy_cmd,
     doctor as doctor_cmd,
@@ -58,7 +57,6 @@ def _root(
 # v1 surface — a faithful subset of the interactive client's commands, plus one
 # composite: `deploy` (= create/import + start in one call, the primitive agents reach for). Order
 # here is irrelevant; --help lists them alphabetically (SortedCommandsGroup).
-app.command("connect")(connect_cmd.connect)
 app.command("balance")(balance_cmd.balance)
 app.command("create")(create_cmd.create)
 app.command("import")(import_cmd.import_config)

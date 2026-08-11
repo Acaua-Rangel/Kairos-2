@@ -2,7 +2,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from kairos.client.config.config_helpers import ClientConfigAdapter, get_connector_class
-from kairos.client.config.security import Security
+from kairos.client.config.env_credentials import env_api_keys
 from kairos.client.settings import AllConnectorSettings
 from kairos.connector.exchange.paper_trade import create_paper_trade_market
 from kairos.connector.exchange_base import ExchangeBase
@@ -81,10 +81,11 @@ class ConnectorManager:
                         connector.set_balance(asset, balance)
             else:
                 # Create live connector
-                keys = api_keys or Security.api_keys(connector_name)
+                keys = api_keys or env_api_keys(connector_name)
                 if not keys:
                     raise ValueError(f"API keys required for live trading connector '{connector_name}'. "
-                                     f"Either provide API keys or use a paper trade connector.")
+                                     f"Set BINANCE_API_KEY/BINANCE_API_SECRET in .env, or use a paper trade "
+                                     f"connector.")
 
                 init_params = conn_setting.conn_init_parameters(
                     trading_pairs=trading_pairs,

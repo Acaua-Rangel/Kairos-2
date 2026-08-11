@@ -5,7 +5,6 @@ from kairos.client.config.config_helpers import ClientConfigAdapter
 from kairos.client.settings import AllConnectorSettings, ConnectorSetting
 from kairos.logger import KairosLogger
 
-from ...client.config.security import Security
 from .async_utils import safe_ensure_future
 
 
@@ -41,7 +40,6 @@ class TradingPairFetcher:
         safe_ensure_future(self.call_fetch_pairs(connector.all_trading_pairs(), connector_name))
 
     async def fetch_all(self, client_config_map: ClientConfigAdapter):
-        await Security.wait_til_decryption_done()
         connector_settings = self._all_connector_settings()
         for conn_setting in connector_settings.values():
             # XXX(martin_kou): Some connectors, e.g. uniswap v3, aren't completed yet. Ignore if you can't find the

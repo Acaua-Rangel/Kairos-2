@@ -80,13 +80,13 @@ class ConnectorManagerTest(IsolatedAsyncioWrapperTestCase):
         self.mock_connector.set_balance.assert_any_call("USDT", Decimal("10000.0"))
 
     @patch("kairos.core.connector_manager.get_connector_class")
-    @patch("kairos.core.connector_manager.Security")
+    @patch("kairos.core.connector_manager.env_api_keys")
     @patch("kairos.core.connector_manager.AllConnectorSettings")
-    def test_create_live_connector(self, mock_settings, mock_security, mock_get_class):
+    def test_create_live_connector(self, mock_settings, mock_env_api_keys, mock_get_class):
         """Test creating a live connector"""
         # Set up mocks
         mock_api_keys = {"api_key": "test_key", "api_secret": "test_secret"}
-        mock_security.api_keys.return_value = mock_api_keys
+        mock_env_api_keys.return_value = mock_api_keys
 
         mock_conn_setting = Mock()
         mock_conn_setting.conn_init_parameters.return_value = {
@@ -112,14 +112,14 @@ class ConnectorManagerTest(IsolatedAsyncioWrapperTestCase):
         self.assertIn("binance", self.connector_manager.connectors)
 
         # Verify methods were called correctly
-        mock_security.api_keys.assert_called_once_with("binance")
+        mock_env_api_keys.assert_called_once_with("binance")
         mock_conn_setting.conn_init_parameters.assert_called_once()
         mock_connector_class.assert_called_once()
 
-    @patch("kairos.core.connector_manager.Security")
-    def test_create_live_connector_no_api_keys(self, mock_security):
+    @patch("kairos.core.connector_manager.env_api_keys")
+    def test_create_live_connector_no_api_keys(self, mock_env_api_keys):
         """Test creating a live connector without API keys raises error"""
-        mock_security.api_keys.return_value = None
+        mock_env_api_keys.return_value = None
 
         with self.assertRaises(ValueError) as context:
             self.connector_manager.create_connector(
@@ -317,7 +317,6 @@ class ConnectorManagerTest(IsolatedAsyncioWrapperTestCase):
         self.assertIn("Settings error", str(context.exception))
         # Connector should not be added
         self.assertNotIn("binance", self.connector_manager.connectors)
-
 
     async def test_update_connector_balances(self):
         """Test update_connector_balances method"""

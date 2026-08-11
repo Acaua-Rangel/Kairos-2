@@ -1,7 +1,6 @@
 import argparse
 from typing import TYPE_CHECKING, List
 
-from kairos.client.command.connect_command import OPTIONS as CONNECT_OPTIONS
 from kairos.exceptions import ArgumentParserError
 
 if TYPE_CHECKING:
@@ -40,10 +39,6 @@ class ThrowingArgumentParser(argparse.ArgumentParser):
 def load_parser(app: "KairosApplication", command_tabs) -> ThrowingArgumentParser:
     parser = ThrowingArgumentParser(prog="", add_help=False)
     subparsers = parser.add_subparsers()
-
-    connect_parser = subparsers.add_parser("connect", help="List available exchanges and add API keys to them")
-    connect_parser.add_argument("option", nargs="?", choices=CONNECT_OPTIONS, help="Name of the exchange that you want to connect")
-    connect_parser.set_defaults(func=app.connect)
 
     create_parser = subparsers.add_parser("create", help="Create a new bot")
     create_parser.add_argument("--v2-config", dest="script_to_config", nargs="?", default=None, help="Name of the v2 strategy (from conf/scripts/)")

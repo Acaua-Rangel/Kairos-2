@@ -46,7 +46,6 @@ def autofix_permissions(user_group_spec: str) -> None:
     os.setuid(uid)
 
 
-
 async def load_and_start_strategy(hb: KairosApplication,
                                   *,
                                   config_file_name: Optional[str] = None,
@@ -128,7 +127,6 @@ async def load_and_start_strategy(hb: KairosApplication,
 
 async def bootstrap_application(
     client_config_map,
-    secrets_manager,
     *,
     strategy_file_name: str = "kairos",
     override_log_level: Optional[str] = None,
@@ -136,18 +134,13 @@ async def bootstrap_application(
     mqtt_autostart: bool = False,
     silence_console: bool = False,
 ) -> Optional[KairosApplication]:
-    """Shared boot sequence for the legacy quickstart and the hbot engine: log in, decrypt, write the
-    legacy yml files, init logging, read system configs, apply paper-trade settings, and build the
-    ``KairosApplication``. Returns the app, or ``None`` on a bad password. The per-caller bits
-    (logging name/level, MQTT autostart, console silencing) are explicit params so behavior is identical.
+    """Shared boot sequence for the legacy quickstart and the hbot engine: write the legacy yml
+    files, init logging, read system configs, apply paper-trade settings, and build the
+    ``KairosApplication``. The per-caller bits (logging name/level, MQTT autostart, console
+    silencing) are explicit params so behavior is identical.
     """
     from kairos import init_logging
     from kairos.client.config.config_helpers import create_yml_files_legacy, read_system_configs_from_yml
-    from kairos.client.config.security import Security
-    if not Security.login(secrets_manager):
-        logging.getLogger().error("Invalid password.")
-        return None
-    await Security.wait_til_decryption_done()
     await create_yml_files_legacy()
     init_logging("kairos_logs.yml", client_config_map,
                  override_log_level=override_log_level, strategy_file_path=strategy_file_name)

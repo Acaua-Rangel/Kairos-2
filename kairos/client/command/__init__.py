@@ -1,6 +1,5 @@
 from .balance_command import BalanceCommand
 from .config_command import ConfigCommand
-from .connect_command import ConnectCommand
 from .create_command import CreateCommand
 from .exit_command import ExitCommand
 from .export_command import ExportCommand
@@ -19,7 +18,6 @@ from .ticker_command import TickerCommand
 __all__ = [
     BalanceCommand,
     ConfigCommand,
-    ConnectCommand,
     CreateCommand,
     ExitCommand,
     ExportCommand,

@@ -29,6 +29,14 @@ def root_path() -> Path:
     return Path(realpath(join(__file__, "../../")))
 
 
+def _load_dotenv():
+    from dotenv import load_dotenv
+    load_dotenv(root_path() / ".env")
+
+
+_load_dotenv()
+
+
 def get_executor() -> ThreadPoolExecutor:
     global _shared_executor
     if _shared_executor is None:

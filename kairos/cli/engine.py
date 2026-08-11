@@ -8,7 +8,6 @@ interval — the agent decides how often to query. On SIGTERM/SIGINT it stops th
 gracefully (cancelling open orders) and shuts down.
 
 Invoked as: ``python -m kairos.cli.engine --name <name> [--config f | --script-config c]``
-The password is passed via the ``HBOT_PASSWORD`` env var (never argv).
 """
 import argparse
 import asyncio
@@ -21,14 +20,9 @@ import time
 from typing import Any, Dict, Optional
 
 from kairos.cli import bot
-from kairos.client.config.config_crypt import ETHKeyFileSecretManger
 from kairos.client.config.config_helpers import load_client_config_map_from_file
 from kairos.client.kairos_application import KairosApplication
-from kairos.client.runner import (
-    autofix_permissions,
-    bootstrap_application,
-    load_and_start_strategy,
-)
+from kairos.client.runner import autofix_permissions, bootstrap_application, load_and_start_strategy
 
 BALANCE_TIMEOUT = 10.0
 
@@ -110,7 +104,6 @@ async def _serve(hb: KairosApplication, name: str) -> None:
 async def run_engine(name: str,
                      config_file_name: Optional[str],
                      v2_conf: Optional[str],
-                     password: str,
                      auto_set_permissions: Optional[str]) -> int:
     client_config_map = load_client_config_map_from_file()
 
@@ -121,7 +114,7 @@ async def run_engine(name: str,
     # the single rotating log (read by `hbot logs`); silence_console drops the stdout handlers that would
     # otherwise duplicate into the redirected, non-rotating bot.log. No MQTT (this engine isn't run_headless).
     hb = await bootstrap_application(
-        client_config_map, ETHKeyFileSecretManger(password),
+        client_config_map,
         strategy_file_name=name, override_log_level=client_config_map.log_level,
         headless=True, silence_console=True)
     if hb is None:
@@ -153,21 +146,11 @@ def main() -> None:
     parser.add_argument("--auto-set-permissions", default=None, dest="auto_set_permissions")
     args = parser.parse_args()
 
-    # Read the password, then scrub it from this process's environment so none of the subprocesses
-    # the engine (or a connector) may spawn inherit the keystore password. The engine lives for the
-    # bot's whole run — the password should live only in this variable, not in the inheritable env.
-    password = os.environ.get("HBOT_PASSWORD") or os.environ.get("CONFIG_PASSWORD")
-    os.environ.pop("HBOT_PASSWORD", None)
-    os.environ.pop("CONFIG_PASSWORD", None)
-    if not password:
-        sys.stderr.write("HBOT_PASSWORD is not set; the engine cannot unlock the keystore.\n")
-        sys.exit(4)
-
     try:
         ev_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(ev_loop)
         rc = ev_loop.run_until_complete(
-            run_engine(args.name, args.config, args.script_config, password, args.auto_set_permissions))
+            run_engine(args.name, args.config, args.script_config, args.auto_set_permissions))
     except Exception:
         logging.getLogger().error("Engine crashed.", exc_info=True)
         rc = 1

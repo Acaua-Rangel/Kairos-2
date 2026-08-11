@@ -5,10 +5,8 @@ from typing import Union
 
 from pydantic import Field, SecretStr
 
-from kairos.client.config.config_crypt import ETHKeyFileSecretManger
 from kairos.client.config.config_data_types import BaseClientModel, ClientConfigEnum, ClientFieldData
 from kairos.client.config.config_helpers import ClientConfigAdapter, ConfigTraversalItem
-from kairos.client.config.security import Security
 
 
 class SomeEnum(ClientConfigEnum):
@@ -175,19 +173,20 @@ date_attr: 2022-01-02
             class Config:
                 title = "dummy_model"
 
-        Security.secrets_manager = ETHKeyFileSecretManger(password="some-password")
         secret_value = "some_secret"
         instance = ClientConfigAdapter(DummyModel(secret_attr=secret_value))
         res_str = instance.generate_yml_output_str_with_comments()
-        expected_str = """\
+        expected_str = f"""\
 ##############################
 ###   dummy_model config   ###
 ##############################
 
-secret_attr: """
+secret_attr: {secret_value}
+"""
 
-        self.assertTrue(res_str.startswith(expected_str))
-        self.assertNotIn(secret_value, res_str)
+        # No keystore — SecretStr fields round-trip as plain text (is_secure only masks UI prompts
+        # and export, never disk storage).
+        self.assertEqual(expected_str, res_str)
 
     def test_generate_yml_output_dict_with_sub_model_with_secret(self):
         class DummySubModel(BaseClientModel):
@@ -202,7 +201,6 @@ secret_attr: """
             class Config:
                 title = "dummy_model"
 
-        Security.secrets_manager = ETHKeyFileSecretManger(password="some-password")
         secret_value = "some_secret"
         sub_model = DummySubModel(secret_attr=secret_value)
         instance = ClientConfigAdapter(DummyModel(sub_model=sub_model))
@@ -212,11 +210,10 @@ secret_attr: """
             "###   dummy_model config   ###\n"
             "##############################\n\n"
             "sub_model:\n"
-            "  secret_attr: "
+            f"  secret_attr: {secret_value}\n"
         )
 
-        self.assertTrue(res_str.startswith(expected_str))
-        self.assertNotIn(secret_value, res_str)
+        self.assertEqual(expected_str, res_str)
 
     def test_config_paths_includes_all_intermediate_keys(self):
         adapter = self._nested_config_adapter()

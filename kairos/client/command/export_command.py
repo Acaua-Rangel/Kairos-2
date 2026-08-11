@@ -3,7 +3,6 @@ from typing import TYPE_CHECKING, List
 
 import pandas as pd
 
-from kairos.client.config.security import Security
 from kairos.client.settings import DEFAULT_LOG_FILE_PATH
 from kairos.core.utils.async_utils import safe_ensure_future
 from kairos.model.trade_fill import TradeFill
@@ -25,23 +24,8 @@ class ExportCommand:
 
     async def export_keys(self,  # type: KairosApplication
                           ):
-        await Security.wait_til_decryption_done()
-        if not Security.any_secure_configs():
-            self.notify("There are no keys to export.")
-            return
-        self.placeholder_mode = True
-        self.app.hide_input = True
-        if await self.check_password():
-            self.notify("\nWarning: Never disclose API keys or private keys. Anyone with your keys can steal any "
-                        "assets held in your account.")
-            self.notify("\nAPI keys:")
-            for key, cm in Security.all_decrypted_values().items():
-                for el in cm.traverse(secure=False):
-                    if el.client_field_data is not None and el.client_field_data.is_secure:
-                        self.notify(f"{el.attr}: {el.printable_value}")
-        self.app.change_prompt(prompt=">>> ")
-        self.app.hide_input = False
-        self.placeholder_mode = False
+        self.notify("API keys are configured via the .env file (BINANCE_API_KEY/BINANCE_API_SECRET), "
+                    "not stored by Kairos-2 — nothing to export here.")
 
     async def prompt_new_export_file_name(self,  # type: KairosApplication
                                           path):

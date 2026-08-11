@@ -172,7 +172,6 @@ class RunEngineTest(unittest.IsolatedAsyncioTestCase):
     def _patches(self, hb, started=True):
         return (
             patch.object(engine, "load_client_config_map_from_file", return_value=MagicMock(log_level="INFO")),
-            patch.object(engine, "ETHKeyFileSecretManger", return_value=MagicMock()),
             patch.object(engine, "autofix_permissions"),
             patch.object(engine, "bootstrap_application", new=AsyncMock(return_value=hb)),
             patch.object(engine, "load_and_start_strategy", new=AsyncMock(return_value=started)),
@@ -180,11 +179,11 @@ class RunEngineTest(unittest.IsolatedAsyncioTestCase):
             patch.object(bot, "update_meta"),
         )
 
-    async def test_bad_password_returns_4(self):
+    async def test_bootstrap_failure_returns_4(self):
         patches = self._patches(hb=None)
-        with patches[0], patches[1], patches[2] as autofix, patches[3], patches[4] as load_start, \
-                patches[5], patches[6]:
-            rc = await engine.run_engine("mybot", None, None, "pw", None)
+        with patches[0], patches[1] as autofix, patches[2], patches[3] as load_start, \
+                patches[4], patches[5]:
+            rc = await engine.run_engine("mybot", None, None, None)
         self.assertEqual(rc, 4)
         autofix.assert_not_called()
         load_start.assert_not_awaited()
@@ -192,9 +191,9 @@ class RunEngineTest(unittest.IsolatedAsyncioTestCase):
     async def test_failed_strategy_load_returns_1(self):
         hb = _make_hb()
         patches = self._patches(hb, started=False)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], \
-                patches[5], patches[6]:
-            rc = await engine.run_engine("mybot", "conf.yml", None, "pw", None)
+        with patches[0], patches[1], patches[2], patches[3], \
+                patches[4], patches[5]:
+            rc = await engine.run_engine("mybot", "conf.yml", None, None)
         self.assertEqual(rc, 1)
 
     async def test_happy_path_records_meta_and_serves(self):
@@ -203,9 +202,9 @@ class RunEngineTest(unittest.IsolatedAsyncioTestCase):
         hb.trading_core._strategy_file_name = "conf_v2.yml"
         hb.trading_core.strategy_name = "pmm"
         patches = self._patches(hb)
-        with patches[0], patches[1], patches[2] as autofix, patches[3], patches[4] as load_start, \
-                patches[5] as serve, patches[6] as update_meta:
-            rc = await engine.run_engine("mybot", None, "conf_v2.yml", "pw", "501:20")
+        with patches[0], patches[1] as autofix, patches[2], patches[3] as load_start, \
+                patches[4] as serve, patches[5] as update_meta:
+            rc = await engine.run_engine("mybot", None, "conf_v2.yml", "501:20")
         self.assertEqual(rc, 0)
         autofix.assert_called_once_with("501:20")
         load_start.assert_awaited_once_with(hb, config_file_name=None, v2_conf="conf_v2.yml", headless=True)
@@ -220,9 +219,9 @@ class RunEngineTest(unittest.IsolatedAsyncioTestCase):
         hb.strategy_file_name = "conf_v1"
         hb.trading_core.strategy_name = "pmm_simple"
         patches = self._patches(hb)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], \
-                patches[6] as update_meta:
-            rc = await engine.run_engine("mybot", "conf_v1.yml", None, "pw", None)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+                patches[5] as update_meta:
+            rc = await engine.run_engine("mybot", "conf_v1.yml", None, None)
         self.assertEqual(rc, 0)
         update_meta.assert_called_once_with(db_path=None, config_file_path="conf_v1", strategy_name="pmm_simple")
 
@@ -231,7 +230,7 @@ class MainTest(unittest.TestCase):
     """main() is exercised with a fully mocked asyncio module and a mocked run_engine — no real
     event loop is created and no engine machinery runs."""
 
-    def _run_main(self, argv, env, rc=0, run_error=None):
+    def _run_main(self, argv, rc=0, run_error=None):
         fake_asyncio = MagicMock()
         loop = fake_asyncio.new_event_loop.return_value
         if run_error is not None:
@@ -241,38 +240,25 @@ class MainTest(unittest.TestCase):
         run_engine = MagicMock(return_value=MagicMock())  # plain sentinel, not a coroutine
         with patch.object(engine, "asyncio", fake_asyncio), \
                 patch.object(engine, "run_engine", run_engine), \
-                patch.object(engine.sys, "argv", ["engine"] + argv), \
-                patch.dict(engine.os.environ, env, clear=True):
+                patch.object(engine.sys, "argv", ["engine"] + argv):
             with self.assertRaises(SystemExit) as ctx:
                 engine.main()
-            env_after = dict(engine.os.environ)
-        return ctx.exception.code, run_engine, env_after
+        return ctx.exception.code, run_engine
 
-    def test_missing_password_exits_4_without_running(self):
-        code, run_engine, _ = self._run_main(["--name", "mybot"], env={})
-        self.assertEqual(code, 4)
-        run_engine.assert_not_called()
-
-    def test_password_is_scrubbed_from_env_and_passed_to_engine(self):
-        code, run_engine, env_after = self._run_main(
+    def test_args_passed_to_engine(self):
+        code, run_engine = self._run_main(
             ["--name", "mybot", "--config", "c.yml", "--script-config", "v2.yml",
-             "--auto-set-permissions", "501:20"],
-            env={"HBOT_PASSWORD": "s3cret", "CONFIG_PASSWORD": "legacy"})
+             "--auto-set-permissions", "501:20"])
         self.assertEqual(code, 0)
-        run_engine.assert_called_once_with("mybot", "c.yml", "v2.yml", "s3cret", "501:20")
-        self.assertNotIn("HBOT_PASSWORD", env_after)
-        self.assertNotIn("CONFIG_PASSWORD", env_after)
+        run_engine.assert_called_once_with("mybot", "c.yml", "v2.yml", "501:20")
 
-    def test_config_password_fallback(self):
-        code, run_engine, env_after = self._run_main(
-            ["--name", "mybot"], env={"CONFIG_PASSWORD": "legacy"})
+    def test_defaults_when_only_name_given(self):
+        code, run_engine = self._run_main(["--name", "mybot"])
         self.assertEqual(code, 0)
-        self.assertEqual(run_engine.call_args[0][3], "legacy")
-        self.assertNotIn("CONFIG_PASSWORD", env_after)
+        run_engine.assert_called_once_with("mybot", None, None, None)
 
     def test_engine_crash_exits_1(self):
-        code, _, _ = self._run_main(
-            ["--name", "mybot"], env={"HBOT_PASSWORD": "pw"}, run_error=RuntimeError("boom"))
+        code, _ = self._run_main(["--name", "mybot"], run_error=RuntimeError("boom"))
         self.assertEqual(code, 1)
 
 

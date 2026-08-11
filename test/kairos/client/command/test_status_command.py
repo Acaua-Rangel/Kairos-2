@@ -29,11 +29,9 @@ class StatusCommandTest(IsolatedAsyncioWrapperTestCase):
         return async_sleep
 
     @patch("kairos.client.command.status_command.StatusCommand.validate_required_connections")
-    @patch("kairos.client.config.security.Security.is_decryption_done")
-    async def test_status_check_all_handles_network_timeouts(self, is_decryption_done_mock, validate_required_connections_mock):
+    async def test_status_check_all_handles_network_timeouts(self, validate_required_connections_mock):
         validate_required_connections_mock.side_effect = self.get_async_sleep_fn(delay=0.02)
         self.client_config_map.commands_timeout.other_commands_timeout = 0.01
-        is_decryption_done_mock.return_value = True
         strategy_name = "avellaneda_market_making"
         self.app.trading_core.strategy_name = strategy_name
         self.app.strategy_file_name = f"{strategy_name}.yml"

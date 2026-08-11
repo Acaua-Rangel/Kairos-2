@@ -72,8 +72,8 @@ class ConnectorSetting(NamedTuple):
     """
 
     def connector_connected(self) -> str:
-        from kairos.client.config.security import Security
-        return True if Security.connector_config_file_exists(self.name) else False
+        from kairos.client.config.env_credentials import env_api_keys
+        return bool(env_api_keys(self.name))
 
     def module_name(self) -> str:
         # returns connector module name, e.g. binance_exchange
