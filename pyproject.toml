@@ -1,3 +1,79 @@
+[project]
+name = "kairos-2"
+version = "0.1.0"
+description = "Kairos-2 - Binance market making client"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12,<4.0"
+dependencies = [
+    "aiohttp>=3.8.5,<3.14",
+    "asyncssh>=2.13.2",
+    "aioprocessing>=2.0.1",
+    "async-timeout>=4.0.2,<5",
+    "bidict>=0.22.1",
+    "Brotli>=1.2.0",
+    "cachetools>=5.3.1",
+    "cryptography>=41.0.2",
+    "eth-account>=0.13.0",
+    "numpy>=2.2.6",
+    "pandas>=2.3.2",
+    "pandas-ta>=0.4.71b",
+    "prompt_toolkit>=3.0.39",
+    "psutil>=5.9.5",
+    "ptpython>3.0.25",
+    "pydantic>=2",
+    "pyperclip>=1.8.2",
+    "requests>=2.31.0",
+    "ruamel.yaml>=0.2.5",
+    "scipy>=1.11.1",
+    "six>=1.16.0",
+    "base58>=2.1.1",
+    "sqlalchemy>=1.4.49",
+    "tabulate==0.9.0",
+    "tqdm>=4.67.1",
+    "typer>=0.9.0",
+    "ujson>=5.7.0",
+    "urllib3>=1.26.15,<2.0",
+    "PyYAML>=6.0",
+    "aiomqtt>=2.0.0",
+]
+
+[project.urls]
+Repository = "https://github.com/Acaua-Rangel/Kairos-2"
+
+[tool.poetry]
+packages = [{ include = "kairos" }]
+include = [
+    "kairos/core/cpp/*",
+    "kairos/VERSION",
+    "kairos/templates/*TEMPLATE.yml",
+]
+requires-plugins = { poetry-plugin-export = ">=1.8" }
+
+[tool.poetry.build]
+script = "build.py"
+generate-setup-file = false
+
+[tool.poetry.group.dev.dependencies]
+# Cython isn't a runtime dependency — build.py's own Poetry build hook gets it from
+# [build-system] requires via build isolation — but `hbot update` invokes build.py directly
+# (as a fast extension-only rebuild after `git pull`, skipping a full `poetry install`), which
+# needs Cython importable in the venv it runs in. `hbot update` refuses to run in a container
+# (see kairos/cli/commands/update.py), so this only needs to reach source installs, which the
+# dev group already does — the container's `poetry install --only main` skips it.
+cython = ">=3.0.12"
+setuptools = "*"
+autopep8 = "*"
+coverage = ">=7.2.7"
+flake8 = ">=6.0.0"
+diff-cover = ">=7.7.0"
+pre-commit = ">=3.3.3"
+pytest = ">=7.4.0"
+pytest-asyncio = ">=0.16.0"
+pytest-timeout = ">=2.1.0"
+aioresponses = ">=0.7.4"
+aiounittest = ">=1.4.2"
+
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
 # Fail any single test that runs longer than this (seconds) instead of hanging the
@@ -24,8 +100,8 @@ exclude = '''
 '''
 
 [build-system]
-requires = ["setuptools", "wheel", "numpy>=2.2.6", "cython>=3.0.12"]
-build-backend = "setuptools.build_meta"
+requires = ["poetry-core>=2.0.0", "setuptools", "numpy>=2.2.6", "cython>=3.0.12"]
+build-backend = "poetry.core.masonry.api"
 
 [tool.isort]
 line_length = 120
@@ -36,4 +112,3 @@ ensure_newline_before_comments = true
 combine_as_imports = true
 virtual_env = ".venv"
 filter_files = true
-skip = ["setup.py"]

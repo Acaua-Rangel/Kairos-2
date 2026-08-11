@@ -5,7 +5,7 @@ VENV_DIR := $(CURDIR)/.venv
 KAIROS_STATE_DIR := $(HOME)/.local/share/kairos-2
 
 test:
-	coverage run -m pytest \
+	"$(VENV_DIR)/bin/coverage" run -m pytest \
  	--ignore="test/mock" \
  	--ignore="test/kairos/connector/exchange/ndax/" \
  	--ignore="test/kairos/connector/derivative/dydx_v4_perpetual/" \
@@ -14,16 +14,16 @@ test:
  	--ignore="test/kairos/strategy/cross_exchange_market_making/" \
 
 run_coverage: test
-	coverage report
-	coverage html
+	"$(VENV_DIR)/bin/coverage" report
+	"$(VENV_DIR)/bin/coverage" html
 
 report_coverage:
-	coverage report
-	coverage html
+	"$(VENV_DIR)/bin/coverage" report
+	"$(VENV_DIR)/bin/coverage" html
 
 development-diff-cover:
-	coverage xml
-	diff-cover --compare-branch=origin/development coverage.xml
+	"$(VENV_DIR)/bin/coverage" xml
+	"$(VENV_DIR)/bin/diff-cover" --compare-branch=origin/development coverage.xml
 
 build:
 	git clean -xdf && make clean && podman build --format docker -t kairos-2${TAG} -f Dockerfile .
@@ -46,14 +46,15 @@ install:
 			sudo apt-get update && sudo apt-get install -y build-essential python3-venv python3-dev; \
 		fi; \
 	fi
-	python3 -m venv "$(VENV_DIR)"
-	"$(VENV_DIR)/bin/pip" install --upgrade pip setuptools wheel
-	"$(VENV_DIR)/bin/pip" install Cython "numpy>=2.2.6"
-	"$(VENV_DIR)/bin/pip" install -r setup/requirements.txt
-	"$(VENV_DIR)/bin/pip" install --no-deps -r setup/pip_packages.txt > logs/pip_install.log 2>&1
-	"$(VENV_DIR)/bin/pip" install pre-commit
+	export PATH="$$HOME/.local/bin:$$PATH"; \
+	if ! command -v poetry >/dev/null 2>&1; then \
+		echo "Poetry not found — installing it via the official installer (isolated from this project's venv)..."; \
+		curl -sSL https://install.python-poetry.org | python3 -; \
+	fi; \
+	poetry config keyring.enabled false --local; \
+	poetry env use python3; \
+	poetry install --no-interaction
 	"$(VENV_DIR)/bin/pre-commit" install
-	"$(VENV_DIR)/bin/python3" setup.py build_ext --inplace -j$$(nproc 2>/dev/null || echo 4)
 	ln -sf "$(CURDIR)/bin/hbot" "$(VENV_DIR)/bin/hbot"
 	@mkdir -p "$(KAIROS_STATE_DIR)"
 	@echo "$(CURDIR)" > "$(KAIROS_STATE_DIR)/source-path"

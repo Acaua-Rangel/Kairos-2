@@ -38,13 +38,15 @@ Candles feeds and rate-oracle sources were narrowed to Binance, CoinGecko, and C
 
 ## Getting started
 
-Requires Python 3.10+ and a C++ compiler (`gcc`/`g++`) to build the Cython extensions.
+Requires Python 3.12+ and a C++ compiler (`gcc`/`g++`) to build the Cython extensions.
+[Poetry](https://python-poetry.org) is the dependency installer — `make install` installs it
+automatically (isolated from the project's own venv) if it isn't already on your PATH.
 
 ```bash
 git clone https://github.com/Acaua-Rangel/Kairos-2.git
 cd Kairos-2
 
-make install            # create a venv (.venv), build the Cython extensions, expose `hbot`
+make install            # install Poetry if needed, create .venv/, build the Cython extensions, expose `hbot`
 make link-cli            # put `hbot` on your PATH
 hbot --help
 ```

@@ -8,37 +8,30 @@ RUN apt-get update && \
 
 WORKDIR /home/kairos
 
-# Create a venv and install runtime dependencies
-RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-COPY setup/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir Cython "numpy>=2.2.6" && \
-    pip install --no-cache-dir -r /tmp/requirements.txt && \
-    rm /tmp/requirements.txt
+# Poetry is the installer (not pip) — bootstrapped once into the base image, outside the
+# project's own venv. `virtualenvs.in-project` makes `poetry install` create .venv/ right here,
+# matching the same convention `make install` uses on a host. `keyring.enabled false` avoids
+# Poetry probing for a (nonexistent, in a container) OS keyring/D-Bus session.
+RUN pip install --no-cache-dir poetry && \
+    poetry config virtualenvs.in-project true && \
+    poetry config keyring.enabled false
 
 # Copy remaining files
+COPY pyproject.toml poetry.lock poetry.toml build.py ./
 COPY bin/ bin/
 COPY kairos/ kairos/
 COPY scripts/ scripts/
 COPY controllers/ controllers/
 COPY scripts/ scripts-copy/
-COPY setup.py .
 COPY LICENSE .
 COPY README.md .
 
-COPY setup/pip_packages.txt /tmp/pip_packages.txt
-RUN pip install --no-cache-dir --no-deps -r /tmp/pip_packages.txt && \
-    rm /tmp/pip_packages.txt
-
-RUN python3 setup.py build_ext --inplace -j 8 && \
+# `--only main` skips the dev dependency group (pytest, flake8, coverage, ...) — none of it is
+# needed to run the bot. build.py's Cython/numpy requirement is satisfied by Poetry's own build
+# isolation (an ephemeral env per [build-system] requires), so it isn't listed here.
+RUN poetry install --only main --no-interaction && \
     rm -rf build/ && \
     find . -type f -name "*.cpp" -delete
-
-# Cython is only needed to compile the extensions above; the resulting .so
-# files don't need it at runtime.
-RUN pip uninstall -y cython
 
 
 # Build final image using artifacts from builder
@@ -73,15 +66,14 @@ RUN mkdir -p /home/kairos/conf /home/kairos/conf/connectors /home/kairos/conf/st
 WORKDIR /home/kairos
 
 # Copy all build artifacts from builder image
-COPY --from=builder /opt/venv/ /opt/venv/
-COPY --from=builder /home/ /home/
+COPY --from=builder /home/kairos/ /home/kairos/
 
 # Put the venv on PATH so non-login shells (e.g. `podman exec … hbot`) find its python
 # + console scripts, and expose the `hbot` CLI there (mirrors make install).
 # This lets the image run as a single-bot container: `podman run … hbot start <config>`,
 # `podman exec … hbot status`.
-ENV PATH="/opt/venv/bin:$PATH"
-RUN ln -sf /home/kairos/bin/hbot /opt/venv/bin/hbot
+ENV PATH="/home/kairos/.venv/bin:$PATH"
+RUN ln -sf /home/kairos/bin/hbot /home/kairos/.venv/bin/hbot
 
 # Set the default command to run when starting the container.
 # Exec form (not shell form) for a deterministic launch regardless of how the

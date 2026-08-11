@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 GIT_TIMEOUT = 120  # network fetch ceiling; the build step runs untimed (it legitimately takes minutes)
 
 # Changes to these require recompiling the extensions for the running install to match the code.
-COMPILED_SOURCES = ("*.pyx", "*.pxd", "setup.py")
+COMPILED_SOURCES = ("*.pyx", "*.pxd", "build.py")
 
 
 def _git(*args: str) -> str:
@@ -50,7 +50,7 @@ def _version() -> str:
 def _rebuild_extensions() -> None:
     """Recompile in place, streaming output (this is the slow, visible part of an update)."""
     echo("rebuilding Cython extensions (this takes a few minutes)...")
-    proc = subprocess.run([sys.executable, "setup.py", "build_ext", "--inplace", "-j", "8"],
+    proc = subprocess.run([sys.executable, "build.py", "build_ext", "--inplace", "-j", "8"],
                           cwd=REPO_ROOT)
     if proc.returncode != 0:
         fail("extension build failed — the checkout is updated but NOT rebuilt; "
@@ -102,10 +102,10 @@ def update(
     if rebuilt:
         _rebuild_extensions()
 
-    env_changed = _git("diff", "--name-only", f"{local}..HEAD", "--", "setup/requirements.txt")
+    env_changed = _git("diff", "--name-only", f"{local}..HEAD", "--", "poetry.lock")
     record: dict = {"version": f"{old_version} -> {_version()}", "branch": branch,
                     "updated": f"{local} -> {_git('rev-parse', '--short', 'HEAD')}",
                     "commits": behind, "extensions_rebuilt": rebuilt}
     if env_changed:
-        record["note"] = "setup/requirements.txt changed — run `make install` to update the venv"
+        record["note"] = "poetry.lock changed — run `make install` to update the venv"
     emit(record, render_kv(record, title="update"), as_json)

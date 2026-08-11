@@ -1,3 +1,3 @@
 @echo off
 
-python setup.py build_ext --inplace -j 8
+.venv\Scripts\python.exe build.py build_ext --inplace -j 8

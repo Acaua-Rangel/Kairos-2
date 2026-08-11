@@ -2,4 +2,7 @@
 
 cd $(dirname "$0")
 
-python setup.py build_ext --inplace
+PYTHON="./.venv/bin/python3"
+[ -x "$PYTHON" ] || PYTHON="python3"
+
+"$PYTHON" build.py build_ext --inplace

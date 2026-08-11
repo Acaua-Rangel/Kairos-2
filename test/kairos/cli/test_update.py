@@ -136,8 +136,8 @@ class UpdateCommandTest(unittest.TestCase):
             for prefix, reply in table.items():
                 if args[:len(prefix)] == prefix:
                     return reply
-            if args[0] == "diff" and "setup/requirements.txt" in args:
-                return "setup/requirements.txt"
+            if args[0] == "diff" and "poetry.lock" in args:
+                return "poetry.lock"
             return ""
         patch.object(update_mod, "_git", side_effect=fake_git).start()
         patch.object(update_mod, "_rebuild_extensions").start()
