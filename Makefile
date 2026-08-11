@@ -1,11 +1,7 @@
 .ONESHELL:
 .PHONY: test run run_coverage report_coverage development-diff-cover uninstall build install setup deploy down link-cli
 
-DYDX ?= 0
 ENV_FILE := setup/environment.yml
-ifeq ($(DYDX),1)
-  ENV_FILE := setup/environment_dydx.yml
-endif
 
 test:
 	coverage run -m pytest \

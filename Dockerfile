@@ -3,7 +3,7 @@ FROM docker.io/continuumio/miniconda3:latest AS builder
 
 # Install system dependencies
 RUN apt-get update && \
-    apt-get install -y sudo libusb-1.0 gcc g++ python3-dev && \
+    apt-get install -y sudo gcc g++ python3-dev && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /home/kairos
@@ -61,7 +61,7 @@ ENV INSTALLATION_TYPE=docker
 
 # Install system dependencies
 RUN apt-get update && \
-    apt-get install -y sudo libusb-1.0 && \
+    apt-get install -y sudo && \
     rm -rf /var/lib/apt/lists/*
 
 # Create mount points
