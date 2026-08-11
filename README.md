@@ -104,7 +104,7 @@ cheap insurance on a 2GB instance.
 ```bash
 # 1. system dependencies
 sudo apt-get update
-sudo apt-get install -y python3-venv python3-dev gcc g++ git make
+sudo apt-get install -y python3-venv python3-dev gcc g++ git make curl
 
 # 2. swap (recommended on 2GB instances)
 sudo fallocate -l 4G /swapfile
