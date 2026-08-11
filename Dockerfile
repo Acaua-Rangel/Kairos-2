@@ -1,18 +1,22 @@
 # Set the base image
-FROM docker.io/continuumio/miniconda3:latest AS builder
+FROM docker.io/library/python:3.13-slim AS builder
 
-# Install system dependencies
+# Install system dependencies (compiler toolchain for the Cython extensions)
 RUN apt-get update && \
-    apt-get install -y sudo gcc g++ python3-dev && \
+    apt-get install -y --no-install-recommends gcc g++ && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /home/kairos
 
-# Create conda environment
-COPY setup/environment.yml /tmp/environment.yml
-RUN conda env create -f /tmp/environment.yml && \
-    conda clean -afy && \
-    rm /tmp/environment.yml
+# Create a venv and install runtime dependencies (no Conda/Miniconda download)
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY setup/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir Cython "numpy>=2.2.6" && \
+    pip install --no-cache-dir -r /tmp/requirements.txt && \
+    rm /tmp/requirements.txt
 
 # Copy remaining files
 COPY bin/ bin/
@@ -24,22 +28,21 @@ COPY setup.py .
 COPY LICENSE .
 COPY README.md .
 
-# activate kairos-2 env when entering the CT
-SHELL [ "/bin/bash", "-lc" ]
-RUN echo "conda activate kairos-2" >> ~/.bashrc
-
 COPY setup/pip_packages.txt /tmp/pip_packages.txt
-RUN python3 -m pip install --no-deps -r /tmp/pip_packages.txt && \
+RUN pip install --no-cache-dir --no-deps -r /tmp/pip_packages.txt && \
     rm /tmp/pip_packages.txt
-
 
 RUN python3 setup.py build_ext --inplace -j 8 && \
     rm -rf build/ && \
     find . -type f -name "*.cpp" -delete
 
+# Cython is only needed to compile the extensions above; the resulting .so
+# files don't need it at runtime.
+RUN pip uninstall -y cython
+
 
 # Build final image using artifacts from builder
-FROM docker.io/continuumio/miniconda3:latest AS release
+FROM docker.io/library/python:3.13-slim AS release
 
 # Dockerfile author / maintainer
 LABEL maintainer="Fede Cardoso @dardonacci <federico@hummingbot.org>"
@@ -61,7 +64,7 @@ ENV INSTALLATION_TYPE=docker
 
 # Install system dependencies
 RUN apt-get update && \
-    apt-get install -y sudo && \
+    apt-get install -y --no-install-recommends sudo && \
     rm -rf /var/lib/apt/lists/*
 
 # Create mount points
@@ -70,23 +73,19 @@ RUN mkdir -p /home/kairos/conf /home/kairos/conf/connectors /home/kairos/conf/st
 WORKDIR /home/kairos
 
 # Copy all build artifacts from builder image
-COPY --from=builder /opt/conda/ /opt/conda/
+COPY --from=builder /opt/venv/ /opt/venv/
 COPY --from=builder /home/ /home/
 
-# Put the kairos-2 env on PATH so non-login shells (e.g. `podman exec … hbot`) find the env's python
-# + console scripts without `conda activate`, and expose the `hbot` CLI there (mirrors make install).
+# Put the venv on PATH so non-login shells (e.g. `podman exec … hbot`) find its python
+# + console scripts, and expose the `hbot` CLI there (mirrors make install).
 # This lets the image run as a single-bot container: `podman run … hbot start <config>`,
 # `podman exec … hbot status`.
-ENV PATH=/opt/conda/envs/kairos-2/bin:$PATH
-RUN ln -sf /home/kairos/bin/hbot /opt/conda/envs/kairos-2/bin/hbot
+ENV PATH="/opt/venv/bin:$PATH"
+RUN ln -sf /home/kairos/bin/hbot /opt/venv/bin/hbot
 
-# Setting bash as default shell because we have .bashrc with customized PATH (setting SHELL affects RUN, CMD and ENTRYPOINT, but not manual commands e.g. `podman run image COMMAND`!)
-SHELL [ "/bin/bash", "-lc" ]
-
-# Set the default command to run when starting the container
-
-# Exec form (not shell form) so this runs via bash -lc regardless of how the builder translates
-# shell-form CMD/ENTRYPOINT — buildah (podman build) was observed wrapping shell-form CMD in
-# `/bin/sh -c` even with `--format docker` and the SHELL instruction above set to bash -lc, which
-# breaks `conda activate` (needs `conda.sh` sourced, which only happens under bash -l).
-CMD ["/bin/bash", "-lc", "conda activate kairos-2 && ./bin/kairos_quickstart.py 2>> ./logs/errors.log"]
+# Set the default command to run when starting the container.
+# Exec form (not shell form) for a deterministic launch regardless of how the
+# builder translates shell-form CMD/ENTRYPOINT (see git history for the
+# buildah/Conda issue this used to hit — no longer applicable without Conda,
+# but exec form is kept as the safer default).
+CMD ["/bin/bash", "-c", "python3 ./bin/kairos_quickstart.py 2>> ./logs/errors.log"]
