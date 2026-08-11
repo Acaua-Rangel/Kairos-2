@@ -102,6 +102,50 @@ make link-cli         # put `hbot` on the host PATH (dispatches into the contain
 
 Or use the interactive full-screen client with `podman attach kairos-2`.
 
+### Deploying on a small cloud VM (e.g. AWS `t4g.small`)
+
+Tested on a 2GB-RAM ARM64 Ubuntu instance. `make install-venv` is the lightest path here — no
+Conda, no container — but still needs a compiler toolchain to build the Cython extensions, and a
+swapfile is cheap insurance on a 2GB instance.
+
+```bash
+# 1. system dependencies
+sudo apt-get update
+sudo apt-get install -y python3-venv python3-dev gcc g++ git make
+
+# 2. swap (recommended on 2GB instances)
+sudo fallocate -l 4G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+# 3. clone and install (note: the branch, not master)
+git clone -b kairos-2 https://github.com/Acaua-Rangel/Kairos-2.git
+cd Kairos-2
+make install-venv
+make link-cli
+# open a new shell (or `source ~/.bashrc`) to pick up the updated PATH
+
+# 4. sanity check
+hbot doctor
+
+# 5. paper trade — no API keys needed
+hbot create simple_pmm --name conf_paper_bot.yml \
+     --set exchange=binance_paper_trade --set trading_pair=BTC-USDT
+hbot start conf_paper_bot.yml
+hbot status
+hbot logs -f
+```
+
+If the VM reboots, run `hbot start conf_paper_bot.yml` again — nothing here wires the bot to
+auto-restart. If `make install-venv` fails partway through on a low-RAM instance, grow the
+swapfile (`sudo swapoff /swapfile && sudo fallocate -l 8G /swapfile && sudo mkswap /swapfile &&
+sudo swapon /swapfile`) and re-run `make install-venv`; it picks up where it left off.
+
+Prefer an isolated container instead? See [Podman](#podman) above — same VM prep (steps 1-2 apply
+to `python3-venv`/`gcc`/`g++`/`make` only; swap out the package list for `podman podman-compose`).
+
 ## Naming
 
 The Python package is `kairos`; the distribution is `kairos-2`; the conda environment and
