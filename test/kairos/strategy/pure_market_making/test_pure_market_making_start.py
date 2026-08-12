@@ -1,7 +1,7 @@
 import unittest.mock
 from decimal import Decimal
-from test.kairos.strategy import assign_config_default
 from test.isolated_asyncio_wrapper_test_case import IsolatedAsyncioWrapperTestCase
+from test.kairos.strategy import assign_config_default
 
 import kairos.strategy.pure_market_making.start as strategy_start
 from kairos.client.config.client_config_map import ClientConfigMap
@@ -53,7 +53,7 @@ class PureMarketMakingStartTest(IsolatedAsyncioWrapperTestCase):
         c_map.get("add_transaction_costs").value = False
         c_map.get("price_source").value = "external_market"
         c_map.get("price_type").value = "best_bid"
-        c_map.get("price_source_exchange").value = "kucoin"
+        c_map.get("price_source_exchange").value = "binance_perpetual"
         c_map.get("price_source_market").value = "ETH-DAI"
         c_map.get("price_source_custom_api").value = "localhost.test"
         c_map.get("order_refresh_tolerance_pct").value = Decimal("2")

@@ -123,7 +123,7 @@ class ImportCommandTest(IsolatedAsyncioWrapperTestCase):
     async def test_import_config_file_success(
         self, status_check_all_mock: AsyncMock, get_strategy_pydantic_config_cls: MagicMock
     ):
-        strategy_name = "perpetual_market_making"
+        strategy_name = "pure_market_making"
         strategy_file_name = f"{strategy_name}.yml"
         status_check_all_mock.return_value = True
         dummy_strategy_config_cls = self.build_dummy_strategy_config_cls(strategy_name)
@@ -149,7 +149,7 @@ class ImportCommandTest(IsolatedAsyncioWrapperTestCase):
     async def test_import_config_file_wrong_name(
         self, status_check_all_mock: AsyncMock, get_strategy_pydantic_config_cls: MagicMock
     ):
-        strategy_name = "perpetual_market_making"
+        strategy_name = "pure_market_making"
         strategy_file_name = f"{strategy_name}.yml"
         status_check_all_mock.return_value = True
         dummy_strategy_config_cls = self.build_dummy_strategy_config_cls(strategy_name)

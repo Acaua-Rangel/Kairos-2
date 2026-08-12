@@ -115,7 +115,7 @@ class TestPMMConfigMap(unittest.TestCase):
         pmm_config_map["exchange"].value = self.exchange
         self.assertEqual(validate_price_source_exchange(value='binance'),
                          'Price source exchange cannot be the same as maker exchange.')
-        self.assertIsNone(validate_price_source_exchange(value='kucoin'))
+        self.assertIsNone(validate_price_source_exchange(value='binance_perpetual_testnet'))
         self.assertIsNone(validate_price_source_exchange(value='binance_perpetual'))
 
     def test_validate_decimal_list(self):

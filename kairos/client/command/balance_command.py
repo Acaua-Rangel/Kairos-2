@@ -7,7 +7,6 @@ import pandas as pd
 
 from kairos.client.config.config_validators import validate_decimal, validate_exchange
 from kairos.client.performance import PerformanceMetrics
-from kairos.client.settings import AllConnectorSettings
 from kairos.core.rate_oracle.rate_oracle import RateOracle
 from kairos.core.utils.async_utils import safe_ensure_future
 from kairos.user.user_balances import UserBalances
@@ -124,7 +123,7 @@ class BalanceCommand:
             # the exchange is CEX. Only show balance if non-zero.
             if bal == Decimal(0):
                 continue
-                allocated = f"{(bal - avai) / bal:.0%}"
+            allocated = f"{(bal - avai) / bal:.0%}"
 
             rate = await RateOracle.get_instance().get_rate(base_token=token)
             rate = Decimal("0") if rate is None else rate

@@ -3,7 +3,7 @@ import time
 from decimal import Decimal
 from pathlib import Path
 from test.isolated_asyncio_wrapper_test_case import IsolatedAsyncioWrapperTestCase
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 from pydantic import Field
 from sqlalchemy.orm import Session
@@ -199,7 +199,11 @@ class TradingCoreTest(IsolatedAsyncioWrapperTestCase):
         )
 
     @patch("kairos.core.trading_core.importlib")
-    @patch("kairos.core.trading_core.inspect")
+    # `inspect.iscoroutinefunction(inspect)` is True in Python 3.12 — the `inspect` module has an
+    # attribute named `_is_coroutine_marker` that collides with the sentinel `iscoroutinefunction`
+    # checks for. `patch()` uses that check to pick AsyncMock over MagicMock, so patching the whole
+    # `inspect` module without forcing `new_callable` silently returns an AsyncMock.
+    @patch("kairos.core.trading_core.inspect", new_callable=MagicMock)
     @patch("kairos.core.trading_core.sys")
     def test_load_script_class(self, mock_sys, mock_inspect, mock_importlib):
         """Test loading script strategy class"""
