@@ -48,20 +48,15 @@ if [ "$prefer" != "container" ] && [ -f "$HOME/.local/share/kairos-2/source-path
 fi
 
 # 2) Container install: a running `kairos-2` container (Podman by default, or Docker if
-#    HBOT_ENGINE=docker). `-i` forwards stdin (e.g. --password-stdin); add a TTY only when this
-#    shell has one, so piping still works. The keystore password env vars must be forwarded
-#    explicitly — `exec` runs with the CONTAINER's env, so a password set on the host (or in an
-#    MCP server's env) would otherwise silently never reach the CLI. Bare `-e VAR` (no =value)
-#    copies the value from this process's env without putting it on argv.
-#    (The array expansion is guarded because bash 3.2 + `set -u` treats an empty array as unbound.)
+#    HBOT_ENGINE=docker). `-i` forwards stdin; add a TTY only when this shell has one, so piping
+#    still works. Binance credentials (BINANCE_API_KEY/BINANCE_API_SECRET) reach the container via
+#    its own env_file (see docker-compose.yml), set once when the container starts — nothing needs
+#    forwarding per-exec here.
 if command -v "$engine" >/dev/null 2>&1 && "$engine" ps --format '{{.Names}}' | grep -qx "$container"; then
-    env_args=()
-    [ -n "${HBOT_PASSWORD:-}" ] && env_args+=(-e HBOT_PASSWORD)
-    [ -n "${CONFIG_PASSWORD:-}" ] && env_args+=(-e CONFIG_PASSWORD)
     if [ -t 0 ]; then
-        exec "$engine" exec -it ${env_args[@]+"${env_args[@]}"} "$container" hbot "$@"
+        exec "$engine" exec -it "$container" hbot "$@"
     fi
-    exec "$engine" exec -i ${env_args[@]+"${env_args[@]}"} "$container" hbot "$@"
+    exec "$engine" exec -i "$container" hbot "$@"
 fi
 
 echo "hbot: no Kairos-2 install found." >&2
