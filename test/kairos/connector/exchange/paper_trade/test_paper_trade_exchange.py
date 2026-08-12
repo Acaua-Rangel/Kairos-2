@@ -9,6 +9,7 @@ from kairos.connector.exchange.paper_trade.paper_trade_exchange import Quantizat
 from kairos.connector.test_support.mock_paper_exchange import MockPaperExchange
 from kairos.core.clock import Clock, ClockMode
 from kairos.core.data_type.common import OrderType, TradeType
+from kairos.core.data_type.order_book_row import OrderBookRow
 from kairos.core.data_type.order_book_tracker import OrderBookTracker
 from kairos.core.data_type.trade_fee import MakerTakerExchangeFeeRates, TradeFeeSchema
 from kairos.core.data_type.trade_fee_registry import TradeFeeRegistry
@@ -95,6 +96,12 @@ class PaperTradeMatchingTests(TestCase):
             quantity,
         ))
 
+    def drop_best_ask_to(self, price: float):
+        """Move the book so that a resting bid above `price` becomes crossed, without trading."""
+        order_book = self.market.get_order_book(self.trading_pair)
+        update_id = order_book.last_diff_uid + 1
+        order_book.apply_diffs([], [OrderBookRow(price, 5.0, update_id)], update_id)
+
     # <editor-fold desc="Fill triggered by a trade print">
 
     def test_limit_buy_fills_when_a_sell_trade_prints_below_its_price(self):
@@ -125,19 +132,20 @@ class PaperTradeMatchingTests(TestCase):
         self.assertEqual(order_id, self.fill_logger.event_log[0].order_id)
         self.assertEqual(TradeType.SELL, self.fill_logger.event_log[0].trade_type)
 
-    def test_trade_at_exactly_the_order_price_does_not_fill(self):
-        """The comparison is strict: the trade has to go through the order's price, not merely reach
-        it. This is the one place today where the simulation is *not* optimistic."""
+    def test_order_priced_where_nothing_rests_fills_from_a_print_at_that_price(self):
+        """99 sits between two book levels (99.5 and 98.5), so an order there improves the book and
+        starts at the front of an empty queue."""
         self.clock.backtest_til(self.start_timestamp + 1)
         self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("99"))
 
         self.simulate_trade(is_buy=False, quantity=Decimal("10"), price=Decimal("99"))
 
-        self.assertEqual(1, len(self.market.limit_orders))
-        self.assertEqual(0, len(self.fill_logger.event_log))
+        self.assertEqual(0, len(self.market.limit_orders))
+        self.assertEqual(1, len(self.fill_logger.event_log))
 
-    def test_trade_quantity_is_ignored_so_a_tiny_print_fills_a_large_order(self):
-        """No queue model: the traded volume never limits the fill, and the fill is all-or-nothing."""
+    def test_a_print_through_the_price_still_fills_the_whole_order(self):
+        """A print below the order's price means the level it rested on was swept whole, so there is
+        no queue left to wait behind."""
         self.clock.backtest_til(self.start_timestamp + 1)
         self.market.buy(self.trading_pair, Decimal("40"), OrderType.LIMIT, Decimal("99"))
 
@@ -146,6 +154,151 @@ class PaperTradeMatchingTests(TestCase):
         self.assertEqual(0, len(self.market.limit_orders))
         self.assertEqual(1, len(self.fill_logger.event_log))
         self.assertEqual(Decimal("40"), self.fill_logger.event_log[0].amount)
+
+    # </editor-fold>
+
+    # <editor-fold desc="Queue position">
+
+    # The book has 20 units resting at 98.5, which is what an order placed there has to wait behind.
+
+    def test_order_does_not_fill_while_the_queue_ahead_of_it_is_being_consumed(self):
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("98.5"))
+
+        self.simulate_trade(is_buy=False, quantity=Decimal("20"), price=Decimal("98.5"))
+
+        self.assertEqual(1, len(self.market.limit_orders))
+        self.assertEqual(0, len(self.fill_logger.event_log))
+
+    def test_order_fills_from_what_is_left_after_the_queue_is_exhausted(self):
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("98.5"))
+
+        self.simulate_trade(is_buy=False, quantity=Decimal("21"), price=Decimal("98.5"))
+
+        self.assertEqual(0, len(self.market.limit_orders))
+        self.assertEqual(1, len(self.fill_logger.event_log))
+        self.assertEqual(Decimal("1"), self.fill_logger.event_log[0].amount)
+
+    def test_the_queue_is_consumed_across_several_prints(self):
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("98.5"))
+
+        for _ in range(4):
+            self.simulate_trade(is_buy=False, quantity=Decimal("5"), price=Decimal("98.5"))
+        self.assertEqual(0, len(self.fill_logger.event_log))
+
+        self.simulate_trade(is_buy=False, quantity=Decimal("1"), price=Decimal("98.5"))
+        self.assertEqual(1, len(self.fill_logger.event_log))
+
+    def test_a_sell_order_waits_behind_the_ask_side_queue(self):
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.sell(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("101.5"))
+
+        self.simulate_trade(is_buy=True, quantity=Decimal("20"), price=Decimal("101.5"))
+        self.assertEqual(0, len(self.fill_logger.event_log))
+
+        self.simulate_trade(is_buy=True, quantity=Decimal("1"), price=Decimal("101.5"))
+        self.assertEqual(1, len(self.fill_logger.event_log))
+
+    def test_one_print_is_shared_between_two_orders_at_the_same_price(self):
+        """The print is walked across the level, so it cannot fill more in total than actually
+        traded there."""
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("98.5"))
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("98.5"))
+
+        # 20 clears the queue, leaving 1 — enough for exactly one of the two orders.
+        self.simulate_trade(is_buy=False, quantity=Decimal("21"), price=Decimal("98.5"))
+
+        self.assertEqual(1, len(self.fill_logger.event_log))
+        self.assertEqual(1, len(self.market.limit_orders))
+
+    # </editor-fold>
+
+    # <editor-fold desc="Partial fills">
+
+    def test_a_print_smaller_than_the_order_fills_it_partially_and_leaves_it_resting(self):
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("98.5"))
+
+        self.simulate_trade(is_buy=False, quantity=Decimal("20.4"), price=Decimal("98.5"))
+
+        self.assertEqual(1, len(self.fill_logger.event_log))
+        self.assertEqual(Decimal("0.4"), self.fill_logger.event_log[0].amount)
+        self.assertEqual(0, len(self.complete_logger.event_log))
+
+        self.assertEqual(1, len(self.market.limit_orders))
+        resting = self.market.limit_orders[0]
+        self.assertEqual(Decimal("1"), resting.quantity)
+        self.assertEqual(Decimal("0.4"), resting.filled_quantity)
+        self.assertEqual(Decimal("98.5"), resting.price)
+
+    def test_successive_prints_complete_a_partially_filled_order(self):
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("98.5"))
+
+        self.simulate_trade(is_buy=False, quantity=Decimal("20.4"), price=Decimal("98.5"))
+        self.simulate_trade(is_buy=False, quantity=Decimal("0.6"), price=Decimal("98.5"))
+
+        self.assertEqual(0, len(self.market.limit_orders))
+        self.assertEqual([Decimal("0.4"), Decimal("0.6")],
+                         [f.amount for f in self.fill_logger.event_log])
+        # One completion, reporting the sum of both fills rather than just the last one.
+        self.assertEqual(1, len(self.complete_logger.event_log))
+        self.assertEqual(Decimal("1"), self.complete_logger.event_log[0].base_asset_amount)
+        self.assertEqual(Decimal("501"), self.market.get_balance(self.base_asset))
+
+    def test_a_partial_fill_only_reserves_the_remainder(self):
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("98.5"))
+        self.simulate_trade(is_buy=False, quantity=Decimal("20.4"), price=Decimal("98.5"))
+
+        held = Decimal("5000") - self.market.get_available_balance(self.quote_asset)
+        # 0.6 still outstanding at 98.5, plus the 98.5 * 1.0 * 0.001 fee already paid on the fill.
+        self.assertEqual(Decimal("0.6") * Decimal("98.5"), held - Decimal("0.4") * Decimal("98.5") * Decimal("1.001"))
+
+    # </editor-fold>
+
+    # <editor-fold desc="The legacy fill model">
+
+    def test_optimistic_model_ignores_traded_volume_entirely(self):
+        self.market.fill_model = "optimistic"
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("98.5"))
+
+        # Would not even clear the queue under the queue model.
+        self.simulate_trade(is_buy=False, quantity=Decimal("0.00001"), price=Decimal("98.4"))
+
+        self.assertEqual(0, len(self.market.limit_orders))
+        self.assertEqual(Decimal("1"), self.fill_logger.event_log[0].amount)
+
+    def test_optimistic_model_fills_on_a_book_cross_with_no_trade(self):
+        self.market.fill_model = "optimistic"
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("99"))
+        self.drop_best_ask_to(98.0)
+
+        self.clock.backtest_til(self.start_timestamp + 2)
+
+        self.assertEqual(0, len(self.market.limit_orders))
+        self.assertEqual(1, len(self.fill_logger.event_log))
+
+    def test_queue_model_does_not_fill_on_a_book_cross_with_no_trade(self):
+        """An order that only becomes marketable later has to wait for something to actually trade
+        at its price — otherwise it jumps the whole queue at that level for free."""
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("99"))
+        self.drop_best_ask_to(98.0)
+
+        self.clock.backtest_til(self.start_timestamp + 5)
+
+        self.assertEqual(1, len(self.market.limit_orders))
+        self.assertEqual(0, len(self.fill_logger.event_log))
+
+    def test_unknown_fill_model_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.market.fill_model = "wishful"
 
     def test_trade_on_the_same_side_never_fills(self):
         """A buy print can only fill resting asks, and a sell print only resting bids."""
@@ -159,11 +312,11 @@ class PaperTradeMatchingTests(TestCase):
 
     # </editor-fold>
 
-    # <editor-fold desc="Fill triggered by the book crossing on a tick">
+    # <editor-fold desc="Marketable limit orders">
 
-    def test_limit_buy_priced_through_the_ask_fills_on_the_next_tick_without_any_trade(self):
-        """The second, tick-driven fill path: no trade has to print at all — it is enough for the
-        resting order to be at or through the opposite side of the book."""
+    def test_limit_buy_placed_through_the_ask_fills_on_the_next_tick_without_any_trade(self):
+        """An order that already crosses the spread when placed is a taker: it lifts what is resting
+        on the other side, so it fills straight off the book with no print needed."""
         self.clock.backtest_til(self.start_timestamp + 1)
         self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("101"))
         self.assertEqual(1, len(self.market.limit_orders))
@@ -182,7 +335,7 @@ class PaperTradeMatchingTests(TestCase):
         self.assertEqual(1, len(self.market.limit_orders))
         self.assertEqual(0, len(self.fill_logger.event_log))
 
-    def test_limit_sell_priced_through_the_bid_fills_on_the_next_tick(self):
+    def test_limit_sell_placed_through_the_bid_fills_on_the_next_tick(self):
         self.clock.backtest_til(self.start_timestamp + 1)
         self.market.sell(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("99"))
 

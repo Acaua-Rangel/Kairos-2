@@ -51,6 +51,19 @@ if TYPE_CHECKING:
 ptm_logger = None
 s_decimal_0 = Decimal(0)
 
+# How a resting limit order is decided to have been filled.
+#
+# QUEUE_POSITION models the order's place in the queue at its price level: it only fills against
+# volume that actually traded there, and only after whatever was already resting at that level when
+# the order was placed. Fills can be partial.
+#
+# OPTIMISTIC is the legacy model, kept for comparison: any print through the order's price fills it
+# whole regardless of the traded volume, and an order is also filled whenever the opposite side of
+# the book merely reaches its price, with no trade needing to happen at all.
+FILL_MODEL_QUEUE_POSITION = "queue_position"
+FILL_MODEL_OPTIMISTIC = "optimistic"
+FILL_MODELS = (FILL_MODEL_QUEUE_POSITION, FILL_MODEL_OPTIMISTIC)
+
 
 cdef class QuantizationParams:
     def __init__(self,
@@ -170,6 +183,15 @@ cdef class PaperTradeExchange(ExchangeBase):
         self._trading_pairs = {}
         self._queued_orders = deque()
         self._quantization_params = {}
+        self._fill_model = FILL_MODEL_QUEUE_POSITION
+        # Resting volume a simulated order still has to wait behind, and the base/quote already
+        # settled for it, both keyed by client order id. Kept in Python rather than on the C++
+        # order so that partial fills don't need a change to LimitOrder.h.
+        self._queue_volume_ahead = {}
+        self._partial_fill_state = {}
+        # Orders that already crossed the spread when they were placed. They are takers, so they are
+        # allowed to fill straight off the book without waiting for a print.
+        self._crossing_orders = set()
         self._order_book_trade_listener = OrderBookTradeListener(self)
         self._target_market = target_market
         self._market_order_filled_listener = OrderBookMarketOrderFillListener(self)
@@ -181,6 +203,16 @@ cdef class PaperTradeExchange(ExchangeBase):
     @property
     def budget_checker(self) -> BudgetChecker:
         return self._budget_checker
+
+    @property
+    def fill_model(self) -> str:
+        return self._fill_model
+
+    @fill_model.setter
+    def fill_model(self, value: str):
+        if value not in FILL_MODELS:
+            raise ValueError(f"Unknown paper trade fill model '{value}'. Expected one of {list(FILL_MODELS)}.")
+        self._fill_model = value
 
     @classmethod
     def random_order_id(cls, order_side: str, trading_pair: str) -> str:
@@ -279,10 +311,15 @@ cdef class PaperTradeExchange(ExchangeBase):
     def on_hold_balances(self) -> Dict[str, Decimal]:
         _on_hold_balances = defaultdict(Decimal)
         for limit_order in self.limit_orders:
+            # Only the unfilled remainder is still reserved — the filled part has already moved.
+            filled = limit_order.filled_quantity
+            outstanding = limit_order.quantity
+            if filled is not None and not filled.is_nan():
+                outstanding -= filled
             if limit_order.is_buy:
-                _on_hold_balances[limit_order.quote_currency] += limit_order.quantity * limit_order.price
+                _on_hold_balances[limit_order.quote_currency] += outstanding * limit_order.price
             else:
-                _on_hold_balances[limit_order.base_currency] += limit_order.quantity
+                _on_hold_balances[limit_order.base_currency] += outstanding
         return _on_hold_balances
 
     @property
@@ -321,6 +358,46 @@ cdef class PaperTradeExchange(ExchangeBase):
         self.c_process_market_orders()
         self.c_process_crossed_limit_orders()
 
+    cdef object c_volume_ahead_of(self, str trading_pair_str, bint is_buy, object price):
+        """Resting volume already sitting at `price`, which a new order has to wait behind.
+
+        Pessimistic on purpose: the simulated order joins the back of that level's queue, since
+        there is no way to know where in it the exchange would really have placed it. An order that
+        improves on the book — priced where nothing is resting — starts with an empty queue.
+        """
+        cdef:
+            object volume = s_decimal_0
+            double target = float(price)
+        if self._fill_model != FILL_MODEL_QUEUE_POSITION:
+            return volume
+        try:
+            order_book = self.c_get_order_book(trading_pair_str)
+        except (ValueError, KeyError):
+            return volume
+        # Bids come back descending and asks ascending, so the loop stops as soon as it walks past
+        # the level in question — it never scans the whole book.
+        for row in (order_book.bid_entries() if is_buy else order_book.ask_entries()):
+            if (row.price < target) if is_buy else (row.price > target):
+                break
+            if row.price == target:
+                volume += Decimal(repr(row.amount))
+                break
+        return volume
+
+    cdef bint c_is_marketable(self, str trading_pair_str, bint is_buy, object price):
+        """Whether a limit order at this price would cross the spread the moment it is placed.
+
+        Such an order is a taker: it lifts what is already resting on the other side, so it does not
+        join any queue and does not need a print to fill.
+        """
+        try:
+            opposite_price = self.c_get_price(trading_pair_str, is_buy)
+        except (ValueError, KeyError, EnvironmentError):
+            return False
+        if opposite_price is None or opposite_price.is_nan():
+            return False
+        return price >= opposite_price if is_buy else price <= opposite_price
+
     cdef str c_buy(self,
                    str trading_pair_str,
                    object amount,
@@ -357,6 +434,9 @@ cdef class PaperTradeExchange(ExchangeBase):
                 insert_result = self._bid_limit_orders.insert(LimitOrdersPair(cpp_trading_pair_str,
                                                                               SingleTradingPairLimitOrders()))
                 map_it = insert_result.first
+            self._queue_volume_ahead[order_id] = self.c_volume_ahead_of(trading_pair_str, True, quantized_price)
+            if self.c_is_marketable(trading_pair_str, True, quantized_price):
+                self._crossing_orders.add(order_id)
             limit_orders_collection_ptr = address(deref(map_it).second)
             limit_orders_collection_ptr.insert(CPPLimitOrder(
                 cpp_order_id,
@@ -417,6 +497,9 @@ cdef class PaperTradeExchange(ExchangeBase):
                 insert_result = self._ask_limit_orders.insert(LimitOrdersPair(cpp_trading_pair_str,
                                                                               SingleTradingPairLimitOrders()))
                 map_it = insert_result.first
+            self._queue_volume_ahead[order_id] = self.c_volume_ahead_of(trading_pair_str, False, quantized_price)
+            if self.c_is_marketable(trading_pair_str, False, quantized_price):
+                self._crossing_orders.add(order_id)
             limit_orders_collection_ptr = address(deref(map_it).second)
             limit_orders_collection_ptr.insert(CPPLimitOrder(
                 cpp_order_id,
@@ -656,8 +739,14 @@ cdef class PaperTradeExchange(ExchangeBase):
                               const SingleTradingPairLimitOrdersIterator orders_it):
         cdef:
             SingleTradingPairLimitOrders *orders_collection_ptr = address(deref(deref(map_it_ptr)).second)
+            str order_id = deref(orders_it).getClientOrderID().decode("utf8")
         try:
             orders_collection_ptr.erase(orders_it)
+            # The only place an order leaves the book, so also the only place its side state has to
+            # be cleaned up.
+            self._queue_volume_ahead.pop(order_id, None)
+            self._partial_fill_state.pop(order_id, None)
+            self._crossing_orders.discard(order_id)
             if orders_collection_ptr.empty():
                 map_it_ptr[0] = limit_orders_map_ptr.erase(deref(map_it_ptr))
             return True
@@ -665,20 +754,60 @@ cdef class PaperTradeExchange(ExchangeBase):
             self.logger().error("Error deleting limit order.", exc_info=True)
             return False
 
+    cdef c_update_filled_quantity(self,
+                                  LimitOrdersIterator *map_it_ptr,
+                                  SingleTradingPairLimitOrdersIterator orders_it,
+                                  object filled_quantity):
+        """Rewrite a resting order with how much of it has been filled so far.
+
+        Elements of a std::set are const, so the only way to change one is to erase it and insert
+        the replacement. That is safe here: the ordering is (price, client order id) and a partial
+        fill changes neither, so the order keeps its place and iterators to other elements stay
+        valid. Doing it this way also keeps the fill count off LimitOrder.h — the build does not
+        track header dependencies, so touching it risks a stale-cache ODR violation.
+        """
+        cdef:
+            SingleTradingPairLimitOrders *orders_collection_ptr = address(deref(deref(map_it_ptr)).second)
+            const CPPLimitOrder *cpp_limit_order_ptr = address(deref(orders_it))
+            CPPLimitOrder updated_order
+        updated_order = CPPLimitOrder(
+            cpp_limit_order_ptr.getClientOrderID(),
+            cpp_limit_order_ptr.getTradingPair(),
+            cpp_limit_order_ptr.getIsBuy(),
+            cpp_limit_order_ptr.getBaseCurrency(),
+            cpp_limit_order_ptr.getQuoteCurrency(),
+            cpp_limit_order_ptr.getPrice(),
+            cpp_limit_order_ptr.getQuantity(),
+            <PyObject *> filled_quantity,
+            cpp_limit_order_ptr.getCreationTimestamp(),
+            cpp_limit_order_ptr.getStatus(),
+            cpp_limit_order_ptr.getPosition(),
+        )
+        orders_collection_ptr.erase(orders_it)
+        orders_collection_ptr.insert(updated_order)
+
     cdef c_process_limit_bid_order(self,
                                    LimitOrders *limit_orders_map_ptr,
                                    LimitOrdersIterator *map_it_ptr,
-                                   SingleTradingPairLimitOrdersIterator orders_it):
+                                   SingleTradingPairLimitOrdersIterator orders_it,
+                                   object fill_quantity=None):
         cdef:
             const CPPLimitOrder *cpp_limit_order_ptr = address(deref(orders_it))
             str trading_pair_str = cpp_limit_order_ptr.getTradingPair().decode("utf8")
             str quote_asset = cpp_limit_order_ptr.getQuoteCurrency().decode("utf8")
             str base_asset = cpp_limit_order_ptr.getBaseCurrency().decode("utf8")
             str order_id = cpp_limit_order_ptr.getClientOrderID().decode("utf8")
-            object amount = <object> cpp_limit_order_ptr.getQuantity()
+            object order_quantity = <object> cpp_limit_order_ptr.getQuantity()
+            object already_filled = <object> cpp_limit_order_ptr.getFilledQuantity()
             object price = <object> cpp_limit_order_ptr.getPrice()
             object quote_balance = self.c_get_balance(quote_asset)
             object base_balance = self.c_get_balance(base_asset)
+
+        if already_filled is None:
+            already_filled = s_decimal_0
+        # No explicit quantity means "whatever is left of this order".
+        amount = order_quantity - already_filled if fill_quantity is None else fill_quantity
+        total_filled = already_filled + amount
 
         order_candidate = OrderCandidate(
             trading_pair=trading_pair_str,
@@ -739,11 +868,21 @@ cdef class PaperTradeExchange(ExchangeBase):
                 trading_pair_str,
                 TradeType.BUY,
                 OrderType.LIMIT,
-                <object> cpp_limit_order_ptr.getPrice(),
-                <object> cpp_limit_order_ptr.getQuantity(),
+                price,
+                amount,
                 fees,
                 exchange_trade_id=str(int(self._time() * 1e6))
             ))
+
+        settled_base, settled_quote = self._partial_fill_state.get(order_id, (s_decimal_0, s_decimal_0))
+        settled_base += acquired_amount
+        settled_quote += paid_amount
+
+        if total_filled < order_quantity:
+            # Still something outstanding: keep the order resting, with what it has taken so far.
+            self._partial_fill_state[order_id] = (settled_base, settled_quote)
+            self.c_update_filled_quantity(map_it_ptr, orders_it, total_filled)
+            return
 
         self.c_trigger_event(
             self.BUY_ORDER_COMPLETED_EVENT_TAG,
@@ -752,8 +891,8 @@ cdef class PaperTradeExchange(ExchangeBase):
                 order_id,
                 base_asset,
                 quote_asset,
-                acquired_amount,
-                paid_amount,
+                settled_base,
+                settled_quote,
                 OrderType.LIMIT
             ))
         self.c_delete_limit_order(limit_orders_map_ptr, map_it_ptr, orders_it)
@@ -761,17 +900,25 @@ cdef class PaperTradeExchange(ExchangeBase):
     cdef c_process_limit_ask_order(self,
                                    LimitOrders *limit_orders_map_ptr,
                                    LimitOrdersIterator *map_it_ptr,
-                                   SingleTradingPairLimitOrdersIterator orders_it):
+                                   SingleTradingPairLimitOrdersIterator orders_it,
+                                   object fill_quantity=None):
         cdef:
             const CPPLimitOrder *cpp_limit_order_ptr = address(deref(orders_it))
             str trading_pair_str = cpp_limit_order_ptr.getTradingPair().decode("utf8")
             str quote_asset = cpp_limit_order_ptr.getQuoteCurrency().decode("utf8")
             str base_asset = cpp_limit_order_ptr.getBaseCurrency().decode("utf8")
             str order_id = cpp_limit_order_ptr.getClientOrderID().decode("utf8")
-            object amount = <object> cpp_limit_order_ptr.getQuantity()
+            object order_quantity = <object> cpp_limit_order_ptr.getQuantity()
+            object already_filled = <object> cpp_limit_order_ptr.getFilledQuantity()
             object price = <object> cpp_limit_order_ptr.getPrice()
             object quote_balance = self.c_get_balance(quote_asset)
             object base_balance = self.c_get_balance(base_asset)
+
+        if already_filled is None:
+            already_filled = s_decimal_0
+        # No explicit quantity means "whatever is left of this order".
+        amount = order_quantity - already_filled if fill_quantity is None else fill_quantity
+        total_filled = already_filled + amount
 
         order_candidate = OrderCandidate(
             trading_pair=trading_pair_str,
@@ -832,11 +979,21 @@ cdef class PaperTradeExchange(ExchangeBase):
                 trading_pair_str,
                 TradeType.SELL,
                 OrderType.LIMIT,
-                <object> cpp_limit_order_ptr.getPrice(),
-                <object> cpp_limit_order_ptr.getQuantity(),
+                price,
+                amount,
                 fees,
                 exchange_trade_id=str(int(self._time() * 1e6))
             ))
+
+        settled_base, settled_quote = self._partial_fill_state.get(order_id, (s_decimal_0, s_decimal_0))
+        settled_base += sold_amount
+        settled_quote += acquired_amount
+
+        if total_filled < order_quantity:
+            # Still something outstanding: keep the order resting, with what it has taken so far.
+            self._partial_fill_state[order_id] = (settled_base, settled_quote)
+            self.c_update_filled_quantity(map_it_ptr, orders_it, total_filled)
+            return
 
         self.c_trigger_event(
             self.SELL_ORDER_COMPLETED_EVENT_TAG,
@@ -845,8 +1002,8 @@ cdef class PaperTradeExchange(ExchangeBase):
                 order_id,
                 base_asset,
                 quote_asset,
-                sold_amount,
-                acquired_amount,
+                settled_base,
+                settled_quote,
                 OrderType.LIMIT
             ))
         self.c_delete_limit_order(limit_orders_map_ptr, map_it_ptr, orders_it)
@@ -855,12 +1012,13 @@ cdef class PaperTradeExchange(ExchangeBase):
                                bint is_buy,
                                LimitOrders *limit_orders_map_ptr,
                                LimitOrdersIterator *map_it_ptr,
-                               SingleTradingPairLimitOrdersIterator orders_it):
+                               SingleTradingPairLimitOrdersIterator orders_it,
+                               object fill_quantity=None):
         try:
             if is_buy:
-                self.c_process_limit_bid_order(limit_orders_map_ptr, map_it_ptr, orders_it)
+                self.c_process_limit_bid_order(limit_orders_map_ptr, map_it_ptr, orders_it, fill_quantity)
             else:
-                self.c_process_limit_ask_order(limit_orders_map_ptr, map_it_ptr, orders_it)
+                self.c_process_limit_ask_order(limit_orders_map_ptr, map_it_ptr, orders_it, fill_quantity)
         except Exception as e:
             self.logger().error(f"Error processing limit order.", exc_info=True)
 
@@ -902,6 +1060,13 @@ cdef class PaperTradeExchange(ExchangeBase):
                 inc(orders_it)
 
         for orders_it in process_order_its:
+            if (self._fill_model == FILL_MODEL_QUEUE_POSITION
+                    and address(deref(orders_it)).getClientOrderID().decode("utf8") not in self._crossing_orders):
+                # Filling here means filling without anyone having traded, which jumps the whole
+                # queue at that price level. Under the queue model only orders that were already
+                # marketable when placed are allowed through — those are takers, and lifting resting
+                # liquidity is exactly what they do. Everything else has to wait for a print.
+                continue
             self.c_process_limit_order(is_buy, limit_orders_map_ptr, map_it_ptr, orders_it)
 
     cdef c_process_crossed_limit_orders(self):
@@ -922,6 +1087,42 @@ cdef class PaperTradeExchange(ExchangeBase):
             if map_it != limit_orders_ptr.end():
                 inc(map_it)
 
+    cdef object c_fill_from_queue(self,
+                                  bint is_buy,
+                                  LimitOrders *limit_orders_map_ptr,
+                                  LimitOrdersIterator *map_it_ptr,
+                                  SingleTradingPairLimitOrdersIterator orders_it,
+                                  object trade_quantity):
+        """Spend a trade print against one order resting at exactly the printed price.
+
+        The print first has to work through whatever was already queued at that level when the
+        order was placed; only what is left over reaches the order itself, and only up to what the
+        order still has outstanding. Returns the part of the print still unspent, so that a single
+        print can be walked across several resting orders.
+        """
+        cdef:
+            const CPPLimitOrder *cpp_limit_order_ptr = address(deref(orders_it))
+            str order_id = cpp_limit_order_ptr.getClientOrderID().decode("utf8")
+            object already_filled = <object> cpp_limit_order_ptr.getFilledQuantity()
+            object queue_ahead = self._queue_volume_ahead.get(order_id, s_decimal_0)
+            object consumed_by_queue
+            object outstanding
+            object fill_quantity
+
+        if queue_ahead > s_decimal_0:
+            consumed_by_queue = min(queue_ahead, trade_quantity)
+            self._queue_volume_ahead[order_id] = queue_ahead - consumed_by_queue
+            trade_quantity -= consumed_by_queue
+            if trade_quantity <= s_decimal_0:
+                return s_decimal_0
+
+        if already_filled is None:
+            already_filled = s_decimal_0
+        outstanding = <object> cpp_limit_order_ptr.getQuantity() - already_filled
+        fill_quantity = min(outstanding, trade_quantity)
+        self.c_process_limit_order(is_buy, limit_orders_map_ptr, map_it_ptr, orders_it, fill_quantity)
+        return trade_quantity - fill_quantity
+
     # <editor-fold desc="Event listener functions">
     cdef c_match_trade_to_limit_orders(self, object order_book_trade_event):
         """
@@ -932,8 +1133,10 @@ cdef class PaperTradeExchange(ExchangeBase):
         cdef:
             string cpp_trading_pair = order_book_trade_event.trading_pair.encode("utf8")
             bint is_maker_buy = order_book_trade_event.type is TradeType.SELL
-            object trade_price = order_book_trade_event.price
-            object trade_quantity = order_book_trade_event.amount
+            bint use_queue = self._fill_model == FILL_MODEL_QUEUE_POSITION
+            object trade_price = Decimal(str(order_book_trade_event.price))
+            object remaining_quantity = Decimal(str(order_book_trade_event.amount))
+            object order_price
             LimitOrders *limit_orders_map_ptr = (address(self._bid_limit_orders)
                                                  if is_maker_buy
                                                  else address(self._ask_limit_orders))
@@ -947,12 +1150,14 @@ cdef class PaperTradeExchange(ExchangeBase):
         if map_it == limit_orders_map_ptr.end():
             return
 
+        # Collect every order the print could reach: those it went through, plus — unlike the legacy
+        # model — those resting at exactly the printed price, which is where the queue is modelled.
         orders_collection_ptr = address(deref(map_it).second)
         if is_maker_buy:
             orders_rit = orders_collection_ptr.rbegin()
             while orders_rit != orders_collection_ptr.rend():
                 cpp_limit_order_ptr = address(deref(orders_rit))
-                if <object>cpp_limit_order_ptr.getPrice() <= trade_price:
+                if <object>cpp_limit_order_ptr.getPrice() < trade_price:
                     break
                 process_order_its.push_back(getIteratorFromReverseIterator(
                     <reverse_iterator[SingleTradingPairLimitOrdersIterator]>orders_rit))
@@ -961,13 +1166,28 @@ cdef class PaperTradeExchange(ExchangeBase):
             orders_it = orders_collection_ptr.begin()
             while orders_it != orders_collection_ptr.end():
                 cpp_limit_order_ptr = address(deref(orders_it))
-                if <object>cpp_limit_order_ptr.getPrice() >= trade_price:
+                if <object>cpp_limit_order_ptr.getPrice() > trade_price:
                     break
                 process_order_its.push_back(orders_it)
                 inc(orders_it)
 
         for orders_it in process_order_its:
-            self.c_process_limit_order(is_maker_buy, limit_orders_map_ptr, address(map_it), orders_it)
+            order_price = <object> address(deref(orders_it)).getPrice()
+            if order_price != trade_price:
+                # The print went through this order's price, so the level it rested on was swept
+                # whole and the order goes with it. No queue to wait behind.
+                self.c_process_limit_order(is_maker_buy, limit_orders_map_ptr, address(map_it), orders_it)
+                continue
+            if not use_queue:
+                # Legacy model: an order resting at exactly the printed price never fills.
+                continue
+            if remaining_quantity <= s_decimal_0:
+                break
+            # Orders at the same price are walked in client-order-id order rather than by arrival,
+            # since that is what the underlying set is keyed on. Which of your own same-price orders
+            # gets served first is therefore arbitrary — the total filled across them is not.
+            remaining_quantity = self.c_fill_from_queue(
+                is_maker_buy, limit_orders_map_ptr, address(map_it), orders_it, remaining_quantity)
 
     # </editor-fold>
 

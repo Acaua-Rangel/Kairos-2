@@ -40,11 +40,27 @@ cdef class PaperTradeExchange(ExchangeBase):
         LimitOrderExpirationSet _limit_order_expiration_set
         object _target_market
         str _exchange_name
+        str _fill_model
+        dict _queue_volume_ahead
+        dict _partial_fill_state
+        set _crossing_orders
 
     cdef c_execute_buy(self, str order_id, str trading_pair, object amount)
     cdef c_execute_sell(self, str order_id, str trading_pair, object amount)
     cdef dict c_fee_collaterals(self, object order_candidate)
     cdef c_deduct_fee_collaterals(self, dict fee_collaterals)
+    cdef object c_volume_ahead_of(self, str trading_pair_str, bint is_buy, object price)
+    cdef bint c_is_marketable(self, str trading_pair_str, bint is_buy, object price)
+    cdef object c_fill_from_queue(self,
+                                  bint is_buy,
+                                  LimitOrders *limit_orders_map_ptr,
+                                  LimitOrdersIterator *map_it_ptr,
+                                  SingleTradingPairLimitOrdersIterator orders_it,
+                                  object trade_quantity)
+    cdef c_update_filled_quantity(self,
+                                  LimitOrdersIterator *map_it_ptr,
+                                  SingleTradingPairLimitOrdersIterator orders_it,
+                                  object filled_quantity)
     cdef c_process_market_orders(self)
     cdef c_set_balance(self, str currency, object amount)
     cdef object c_get_fee(self,
@@ -63,15 +79,18 @@ cdef class PaperTradeExchange(ExchangeBase):
                                bint is_buy,
                                LimitOrders *limit_orders_map_ptr,
                                LimitOrdersIterator *map_it_ptr,
-                               SingleTradingPairLimitOrdersIterator orders_it)
+                               SingleTradingPairLimitOrdersIterator orders_it,
+                               object fill_quantity=*)
     cdef c_process_limit_bid_order(self,
                                    LimitOrders *limit_orders_map_ptr,
                                    LimitOrdersIterator *map_it_ptr,
-                                   SingleTradingPairLimitOrdersIterator orders_it)
+                                   SingleTradingPairLimitOrdersIterator orders_it,
+                                   object fill_quantity=*)
     cdef c_process_limit_ask_order(self,
                                    LimitOrders *limit_orders_map_ptr,
                                    LimitOrdersIterator *map_it_ptr,
-                                   SingleTradingPairLimitOrdersIterator orders_it)
+                                   SingleTradingPairLimitOrdersIterator orders_it,
+                                   object fill_quantity=*)
     cdef c_process_crossed_limit_orders_for_trading_pair(self,
                                                          bint is_buy,
                                                          LimitOrders *limit_orders_map_ptr,
