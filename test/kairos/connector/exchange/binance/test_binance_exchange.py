@@ -903,6 +903,25 @@ class BinanceExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests
 
         self.assertEqual({}, self.exchange._trading_fees)
         self.assertIsNone(TradeFeeRegistry.rates_for("binance", self.trading_pair))
+        # A generic network error is not mistaken for an invalid-credentials problem.
+        self.assertFalse(self.is_logged("NETWORK", "Binance credentials for 'binance' are invalid."))
+
+    @aioresponses()
+    def test_update_trading_fees_invalid_credentials_warns_clearly(self, mock_api):
+        self.addCleanup(TradeFeeRegistry.clear)
+        url = web_utils.sapi_rest_url(CONSTANTS.TRADE_FEE_PATH_URL, domain=self.exchange._domain)
+        regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
+        mock_api.get(
+            regex_url,
+            exception=IOError(
+                'Error executing request GET url. HTTP status is 401. Error: '
+                '{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action."}'))
+
+        self.async_run_with_timeout(self.exchange._update_trading_fees())  # must not raise
+
+        self.assertEqual({}, self.exchange._trading_fees)
+        self.assertIsNone(TradeFeeRegistry.rates_for("binance", self.trading_pair))
+        self.assertTrue(self.is_logged("NETWORK", "Binance credentials for 'binance' are invalid."))
 
     def test_get_fee_limit_order_uses_maker_rate(self):
         self.addCleanup(TradeFeeRegistry.clear)

@@ -51,10 +51,13 @@ class ConnectorManagerTest(IsolatedAsyncioWrapperTestCase):
         self.assertEqual(manager.client_config_map, self.client_config_adapter)
         self.assertEqual(manager.connectors, {})
 
+    @patch("kairos.core.connector_manager.env_api_keys")
     @patch("kairos.core.connector_manager.create_paper_trade_market")
-    def test_create_paper_trade_connector(self, mock_create_paper_trade):
-        """Test creating a paper trade connector"""
-        # Set up mock
+    def test_create_paper_trade_connector(self, mock_create_paper_trade, mock_env_api_keys):
+        """Test creating a paper trade connector (no Binance credentials configured)"""
+        # Set up mock — explicitly no credentials, regardless of the host's real .env, so this
+        # test stays deterministic and never risks a real fee-probe connector/network call.
+        mock_env_api_keys.return_value = None
         mock_create_paper_trade.return_value = self.mock_connector
 
         # Create paper trade connector
@@ -78,6 +81,42 @@ class ConnectorManagerTest(IsolatedAsyncioWrapperTestCase):
         # Verify balances were set
         self.mock_connector.set_balance.assert_any_call("BTC", Decimal("1.0"))
         self.mock_connector.set_balance.assert_any_call("USDT", Decimal("10000.0"))
+
+        # No credentials configured -> no real fee-probe connector should be involved.
+        mock_env_api_keys.assert_called_once_with("binance")
+
+    @patch("kairos.core.connector_manager.safe_ensure_future")
+    @patch("kairos.core.connector_manager.get_connector_class")
+    @patch("kairos.core.connector_manager.env_api_keys")
+    @patch("kairos.core.connector_manager.create_paper_trade_market")
+    def test_create_paper_trade_connector_with_credentials_schedules_fee_probe(
+            self, mock_create_paper_trade, mock_env_api_keys, mock_get_class, mock_safe_ensure_future):
+        """When real Binance credentials ARE configured, paper trade should use a real (never
+        added to self.connectors) connector in the background to fetch real per-pair fees."""
+        mock_create_paper_trade.return_value = self.mock_connector
+        mock_env_api_keys.return_value = {"binance_api_key": "k", "binance_api_secret": "s"}
+
+        fee_probe_instance = Mock()
+        fee_probe_instance._trading_fees_polling_loop = Mock(return_value="the-polling-coroutine")
+        mock_connector_class = Mock(return_value=fee_probe_instance)
+        mock_get_class.return_value = mock_connector_class
+
+        connector = self.connector_manager.create_connector(
+            "binance_paper_trade",
+            ["BTC-USDT", "ETH-USDT"],
+            trading_required=True
+        )
+
+        # The paper trade connector itself is unaffected.
+        self.assertEqual(connector, self.mock_connector)
+
+        mock_env_api_keys.assert_called_once_with("binance")
+        mock_get_class.assert_called_once_with("binance")
+        mock_connector_class.assert_called_once()
+        # The fee-probe connector is never tracked — it only exists to fetch fees.
+        self.assertNotIn(fee_probe_instance, self.connector_manager.connectors.values())
+        fee_probe_instance._trading_fees_polling_loop.assert_called_once()
+        mock_safe_ensure_future.assert_called_once_with("the-polling-coroutine")
 
     @patch("kairos.core.connector_manager.get_connector_class")
     @patch("kairos.core.connector_manager.env_api_keys")

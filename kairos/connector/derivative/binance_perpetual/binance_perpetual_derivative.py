@@ -21,7 +21,7 @@ from kairos.connector.derivative.binance_perpetual.binance_perpetual_user_stream
 from kairos.connector.derivative.position import Position
 from kairos.connector.perpetual_derivative_py_base import PerpetualDerivativePyBase
 from kairos.connector.trading_rule import TradingRule
-from kairos.connector.utils import combine_to_hb_trading_pair
+from kairos.connector.utils import combine_to_hb_trading_pair, is_invalid_credentials_error
 from kairos.core.api_throttler.data_types import RateLimit
 from kairos.core.data_type.common import OrderType, PositionAction, PositionMode, PositionSide, TradeType
 from kairos.core.data_type.in_flight_order import InFlightOrder, OrderUpdate, TradeUpdate
@@ -231,10 +231,18 @@ class BinancePerpetualDerivative(PerpetualDerivativePyBase):
         rates: Dict[str, MakerTakerExchangeFeeRates] = dict(self._trading_fees)
         for trading_pair, result in results:
             if isinstance(result, Exception):
-                self.logger().network(
-                    f"Error fetching the trading fee for {trading_pair} from Binance.", exc_info=result,
-                    app_warning_msg=f"Could not fetch the real trading fee for {trading_pair}; "
-                                    "using the default fee schema instead.")
+                if is_invalid_credentials_error(result):
+                    self.logger().network(
+                        f"Binance credentials for '{self.name}' are invalid.",
+                        app_warning_msg=f"Binance credentials for '{self.name}' are invalid — "
+                                        f"using the default fee schema for {trading_pair} instead "
+                                        f"of the real per-pair rate. Check BINANCE_API_KEY/"
+                                        f"BINANCE_API_SECRET in .env.")
+                else:
+                    self.logger().network(
+                        f"Error fetching the trading fee for {trading_pair} from Binance.", exc_info=result,
+                        app_warning_msg=f"Could not fetch the real trading fee for {trading_pair}; "
+                                        "using the default fee schema instead.")
                 continue
             maker = Decimal(str(result["makerCommissionRate"]))
             taker = Decimal(str(result["takerCommissionRate"]))

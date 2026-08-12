@@ -15,7 +15,7 @@ from kairos.connector.exchange.binance.binance_api_user_stream_data_source impor
 from kairos.connector.exchange.binance.binance_auth import BinanceAuth
 from kairos.connector.exchange_py_base import ExchangePyBase
 from kairos.connector.trading_rule import TradingRule
-from kairos.connector.utils import TradeFillOrderDetails, combine_to_hb_trading_pair
+from kairos.connector.utils import TradeFillOrderDetails, combine_to_hb_trading_pair, is_invalid_credentials_error
 from kairos.core.data_type.common import OrderType, TradeType
 from kairos.core.data_type.in_flight_order import InFlightOrder, OrderUpdate, TradeUpdate
 from kairos.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
@@ -308,11 +308,18 @@ class BinanceExchange(ExchangePyBase):
                 is_auth_required=True)
         except asyncio.CancelledError:
             raise
-        except Exception:
-            self.logger().network(
-                "Error fetching trading fees from Binance.", exc_info=True,
-                app_warning_msg="Could not fetch real trading fees from Binance; "
-                                "using the default fee schema instead.")
+        except Exception as e:
+            if is_invalid_credentials_error(e):
+                self.logger().network(
+                    f"Binance credentials for '{self.name}' are invalid.",
+                    app_warning_msg=f"Binance credentials for '{self.name}' are invalid — using "
+                                    f"the default fee schema instead of real per-pair rates. Check "
+                                    f"BINANCE_API_KEY/BINANCE_API_SECRET in .env.")
+            else:
+                self.logger().network(
+                    "Error fetching trading fees from Binance.", exc_info=True,
+                    app_warning_msg="Could not fetch real trading fees from Binance; "
+                                    "using the default fee schema instead.")
             return
 
         symbol_map = await self.trading_pair_symbol_map()

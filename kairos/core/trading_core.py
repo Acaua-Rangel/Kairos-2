@@ -20,6 +20,7 @@ from kairos.client.settings import SCRIPT_STRATEGIES_MODULE, STRATEGIES
 from kairos.connector.connector_metrics_collector import DummyMetricsCollector, MetricsCollector
 from kairos.connector.exchange_base import ExchangeBase
 from kairos.connector.markets_recorder import MarketsRecorder
+from kairos.connector.utils import is_invalid_credentials_error
 from kairos.core.clock import Clock, ClockMode
 from kairos.core.connector_manager import ConnectorManager
 from kairos.core.rate_oracle.rate_oracle import RateOracle
@@ -235,6 +236,9 @@ class TradingCore:
             connector_name, trading_pairs, trading_required, api_keys
         )
 
+        if not connector_name.endswith("paper_trade"):
+            await self._validate_live_connector_credentials(connector, connector_name)
+
         # Add to clock if running
         if self.clock and connector:
             self.clock.add_iterator(connector)
@@ -244,6 +248,23 @@ class TradingCore:
             self.markets_recorder.add_market(connector)
 
         return connector
+
+    async def _validate_live_connector_credentials(self, connector: ExchangeBase, connector_name: str) -> None:
+        """Fail fast if `connector_name`'s credentials don't actually work, instead of letting the
+        strategy start silently and only discovering it later via recurring polling-loop warnings
+        or a failed order. Paper trade connectors never need this — see the caller.
+
+        `_update_balances()` is the probe: unlike `_update_trading_fees()` it never swallows its
+        own exceptions, and it's the same endpoint `hbot balance` would hit anyway.
+        """
+        try:
+            await connector._update_balances()
+        except Exception as e:
+            if is_invalid_credentials_error(e):
+                raise ValueError(
+                    f"Invalid credentials for connector '{connector_name}' — check "
+                    f"BINANCE_API_KEY/BINANCE_API_SECRET in .env.") from e
+            raise ValueError(f"Could not verify credentials for connector '{connector_name}': {e}") from e
 
     def _initialize_metrics_for_connector(self, connector: ExchangeBase, connector_name: str):
         """Initialize metrics collector for a specific connector."""
@@ -663,6 +684,9 @@ class TradingCore:
             connector = self.connector_manager.create_connector(
                 connector_name, trading_pairs, self._trading_required
             )
+
+            if not connector_name.endswith("paper_trade"):
+                await self._validate_live_connector_credentials(connector, connector_name)
 
             # Add to clock if running
             if self.clock and connector:

@@ -2391,6 +2391,28 @@ class BinancePerpetualDerivativeUnitTest(IsolatedAsyncioWrapperTestCase):
 
         self.assertEqual({}, self.exchange._trading_fees)
         self.assertIsNone(TradeFeeRegistry.rates_for(CONSTANTS.EXCHANGE_NAME, self.trading_pair))
+        # A generic network error is not mistaken for an invalid-credentials problem.
+        self.assertFalse(self._is_logged(
+            "NETWORK", f"Binance credentials for '{CONSTANTS.EXCHANGE_NAME}' are invalid."))
+
+    @aioresponses()
+    async def test_update_trading_fees_invalid_credentials_warns_clearly(self, req_mock):
+        self.addCleanup(TradeFeeRegistry.clear)
+        self.exchange._set_trading_pair_symbol_map(bidict({self.symbol: self.trading_pair}))
+        url = web_utils.private_rest_url(path_url=CONSTANTS.COMMISSION_RATE_URL, domain=self.domain)
+        regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
+        req_mock.get(
+            regex_url,
+            exception=IOError(
+                'Error executing request GET url. HTTP status is 401. Error: '
+                '{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action."}'))
+
+        await self.exchange._update_trading_fees()  # must not raise
+
+        self.assertEqual({}, self.exchange._trading_fees)
+        self.assertIsNone(TradeFeeRegistry.rates_for(CONSTANTS.EXCHANGE_NAME, self.trading_pair))
+        self.assertTrue(self._is_logged(
+            "NETWORK", f"Binance credentials for '{CONSTANTS.EXCHANGE_NAME}' are invalid."))
 
     async def test_get_fee_limit_order_uses_maker_rate(self):
         self.addCleanup(TradeFeeRegistry.clear)

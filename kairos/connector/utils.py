@@ -132,3 +132,24 @@ def to_0x_hex(signature: HexBytes | bytes) -> str:
         return signature.to_0x_hex()
 
     return hex if (hex := signature.hex()).startswith("0x") else f"0x{hex}"
+
+
+# Binance wraps every failed REST call (kairos/core/web_assistant/rest_assistant.py) in a bare
+# IOError with no structured error code, so a rejected API key/secret and a transient network
+# problem are otherwise indistinguishable. Same string-matching approach already used for a
+# different Binance error code (see BinanceExchange._is_request_exception_related_to_time_synchronizer).
+_INVALID_CREDENTIALS_MARKERS = (
+    "HTTP status is 401",
+    '"code":-2015',   # Invalid API-key, IP, or permissions for action
+    '"code":-2014',   # API-key format invalid
+    '"code":-1022',   # Signature for this request is not valid
+    "Invalid API-key",
+)
+
+
+def is_invalid_credentials_error(exc: Exception) -> bool:
+    """Best-effort classification of a REST exception as "the API key/secret are rejected by
+    Binance" rather than a transient network problem — used to fail fast (live trading) or warn
+    clearly (paper trade) instead of treating every failure the same way."""
+    text = str(exc)
+    return any(marker in text for marker in _INVALID_CREDENTIALS_MARKERS)

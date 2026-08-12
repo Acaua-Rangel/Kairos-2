@@ -7,6 +7,7 @@ from kairos.client.settings import AllConnectorSettings
 from kairos.connector.exchange.paper_trade import create_paper_trade_market
 from kairos.connector.exchange_base import ExchangeBase
 from kairos.core.rate_oracle.rate_oracle import RateOracle
+from kairos.core.utils.async_utils import safe_ensure_future
 
 
 class ConnectorManager:
@@ -79,6 +80,23 @@ class ConnectorManager:
                 if paper_trade_account_balance is not None:
                     for asset, balance in paper_trade_account_balance.items():
                         connector.set_balance(asset, balance)
+
+                # If real Binance credentials are configured, use a real (never-trading) connector
+                # in the background to fetch this account's real per-pair fees — e.g. a promo like
+                # FDUSD's 0% maker — so paper trade's PnL/spread estimates reflect them too.
+                # PaperTradeExchange.name equals base_connector (no "_paper_trade" suffix), which is
+                # exactly the key a real connector publishes to under TradeFeeRegistry, so nothing
+                # else needs to change for build_trade_fee to pick this up. No credentials
+                # configured -> skip entirely, same behavior as before this change.
+                fee_probe_keys = env_api_keys(base_connector_name)
+                if fee_probe_keys:
+                    fee_probe_params = conn_setting.conn_init_parameters(
+                        trading_pairs=trading_pairs,
+                        trading_required=False,
+                        api_keys=fee_probe_keys,
+                    )
+                    fee_probe_connector = get_connector_class(base_connector_name)(**fee_probe_params)
+                    safe_ensure_future(fee_probe_connector._trading_fees_polling_loop())
             else:
                 # Create live connector
                 keys = api_keys or env_api_keys(connector_name)

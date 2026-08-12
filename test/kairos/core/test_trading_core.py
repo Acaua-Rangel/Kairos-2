@@ -409,6 +409,26 @@ class TradingCoreTest(IsolatedAsyncioWrapperTestCase):
             self.assertEqual(mock_create.call_count, 2)
             mock_init_recorder.assert_called_once()
 
+    @patch.object(TradingCore, "initialize_markets_recorder")
+    async def test_initialize_markets_blocks_on_invalid_credentials(self, mock_init_recorder):
+        self.mock_connector._update_balances = AsyncMock(
+            side_effect=IOError(
+                'Error executing request GET url. HTTP status is 401. Error: '
+                '{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action."}'))
+        with patch.object(self.trading_core.connector_manager, "create_connector") as mock_create:
+            mock_create.return_value = self.mock_connector
+            with self.assertRaises(ValueError) as ctx:
+                await self.trading_core.initialize_markets([("binance", ["BTC-USDT"])])
+        self.assertIn("Invalid credentials", str(ctx.exception))
+
+    @patch.object(TradingCore, "initialize_markets_recorder")
+    async def test_initialize_markets_skips_credential_validation_for_paper_trade(self, mock_init_recorder):
+        self.mock_connector._update_balances = AsyncMock(side_effect=AssertionError("should not be called"))
+        with patch.object(self.trading_core.connector_manager, "create_connector") as mock_create:
+            mock_create.return_value = self.mock_connector
+            await self.trading_core.initialize_markets([("binance_paper_trade", ["BTC-USDT"])])
+        self.mock_connector._update_balances.assert_not_awaited()
+
     @patch.object(TradingCore, "stop_strategy")
     @patch.object(TradingCore, "stop_clock")
     @patch.object(TradingCore, "remove_connector")
@@ -454,6 +474,39 @@ class TradingCoreTest(IsolatedAsyncioWrapperTestCase):
             self.trading_core.clock = Mock()
             connector = await self.trading_core.create_connector("kucoin", ["ETH-BTC"])
             self.trading_core.clock.add_iterator.assert_called_with(self.mock_connector)
+
+    async def test_create_connector_invalid_credentials_blocks_start(self):
+        """A live connector whose credentials Binance rejects (401/-2015) must not be considered
+        started — the strategy should fail fast instead of discovering this later."""
+        self.mock_connector._update_balances = AsyncMock(
+            side_effect=IOError(
+                'Error executing request GET url. HTTP status is 401. Error: '
+                '{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action."}'))
+        with patch.object(self.trading_core.connector_manager, "create_connector") as mock_create:
+            mock_create.return_value = self.mock_connector
+            with self.assertRaises(ValueError) as ctx:
+                await self.trading_core.create_connector("binance", ["BTC-USDT"], True)
+        self.assertIn("Invalid credentials", str(ctx.exception))
+        self.mock_connector._update_balances.assert_awaited_once()
+
+    async def test_create_connector_network_error_also_blocks_start(self):
+        """A generic failure (not clearly a credentials problem) blocks the start too, with a
+        different message — we can't safely start live trading without confirming the account."""
+        self.mock_connector._update_balances = AsyncMock(side_effect=IOError("Connection timed out"))
+        with patch.object(self.trading_core.connector_manager, "create_connector") as mock_create:
+            mock_create.return_value = self.mock_connector
+            with self.assertRaises(ValueError) as ctx:
+                await self.trading_core.create_connector("binance", ["BTC-USDT"], True)
+        self.assertIn("Could not verify credentials", str(ctx.exception))
+
+    async def test_create_connector_skips_credential_validation_for_paper_trade(self):
+        self.mock_connector._update_balances = AsyncMock(side_effect=AssertionError("should not be called"))
+        with patch.object(self.trading_core.connector_manager, "create_connector") as mock_create:
+            mock_create.return_value = self.mock_connector
+            connector = await self.trading_core.create_connector(
+                "binance_paper_trade", ["BTC-USDT"], True)
+        self.assertEqual(connector, self.mock_connector)
+        self.mock_connector._update_balances.assert_not_awaited()
 
     async def test_remove_connector(self):
         """Test removing a connector through trading core"""

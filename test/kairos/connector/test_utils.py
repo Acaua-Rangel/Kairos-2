@@ -15,7 +15,7 @@ from kairos import root_path
 from kairos.client.config.config_data_types import BaseConnectorConfigMap
 from kairos.client.config.config_helpers import ClientConfigAdapter
 from kairos.client.settings import CONNECTOR_SUBMODULES_THAT_ARE_NOT_CEX_TYPES
-from kairos.connector.utils import get_new_client_order_id, to_0x_hex
+from kairos.connector.utils import get_new_client_order_id, is_invalid_credentials_error, to_0x_hex
 
 
 class UtilsTest(unittest.TestCase):
@@ -122,3 +122,17 @@ class UtilsTest(unittest.TestCase):
         signature = HexBytes("1234")
         result = to_0x_hex(signature)
         self.assertEqual(result, "0x1234")
+
+    def test_is_invalid_credentials_error_matches_known_binance_markers(self):
+        for message in (
+            'Error executing request GET url. HTTP status is 401. Error: '
+            '{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action."}',
+            '{"code":-2014,"msg":"API-key format invalid."}',
+            '{"code":-1022,"msg":"Signature for this request is not valid."}',
+            "Invalid API-key, IP, or permissions for action.",
+        ):
+            self.assertTrue(is_invalid_credentials_error(IOError(message)), message)
+
+    def test_is_invalid_credentials_error_does_not_match_generic_network_errors(self):
+        for exc in (IOError("Connection timed out"), TimeoutError(), ConnectionError("refused")):
+            self.assertFalse(is_invalid_credentials_error(exc))
