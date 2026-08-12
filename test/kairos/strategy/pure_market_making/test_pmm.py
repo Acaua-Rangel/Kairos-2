@@ -1,5 +1,6 @@
 import unittest
 from decimal import Decimal
+from test.logger_mixin_for_test import LoggerMixinForTest
 from test.mock.mock_asset_price_delegate import MockAssetPriceDelegate
 from typing import List, Optional
 
@@ -43,7 +44,7 @@ def simulate_order_book_widening(order_book: OrderBook, top_bid: float, top_ask:
     order_book.apply_diffs(bid_diffs, ask_diffs, update_id)
 
 
-class PMMUnitTest(unittest.TestCase):
+class PMMUnitTest(unittest.TestCase, LoggerMixinForTest):
     start: pd.Timestamp = pd.Timestamp("2019-01-01", tz="UTC")
     end: pd.Timestamp = pd.Timestamp("2019-01-01 01:00:00", tz="UTC")
     start_timestamp: float = start.timestamp()
@@ -386,6 +387,44 @@ class PMMUnitTest(unittest.TestCase):
         self.assertEqual(Decimal("3"), strategy.active_buys[-1].quantity)
         self.assertEqual(Decimal("103"), strategy.active_sells[-1].price)
         self.assertEqual(Decimal("3"), strategy.active_sells[-1].quantity)
+
+    def test_apply_budget_constraint_warns_when_a_side_is_dropped_for_insufficient_balance(self):
+        """A side silently vanishing from the proposal — no error, no fill, just never quoted — is
+        exactly what an empty quote/base balance looks like from the logs. Regression coverage for
+        that going unlogged: both the exact-zero-balance case and the reduced-to-zero-after-
+        quantization case must warn."""
+        strategy = self.one_level_strategy
+        self.set_loggers([strategy.logger()])
+        self.clock.add_iterator(strategy)
+
+        self.market.set_balance("HBOT", Decimal("50"))
+        self.market.set_balance("ETH", Decimal("0"))
+        self.clock.backtest_til(self.start_timestamp + 1)
+
+        self.assertEqual(0, len(strategy.active_buys))
+        self.assertTrue(self.is_logged(
+            "WARNING", f"({self.trading_pair}) Insufficient {self.quote_asset} balance to place a buy order. "
+                       f"0 {self.quote_asset} available vs. 99.000000 {self.quote_asset} required. "
+                       f"Skipping this buy order."))
+
+    def test_apply_budget_constraint_warns_for_every_level_starved_by_the_same_proposal(self):
+        """With multiple order levels, the first level can spend the balance down to exactly zero —
+        every level after that must still warn on its own, not just the first one."""
+        strategy = self.multi_levels_strategy
+        self.set_loggers([strategy.logger()])
+        self.clock.add_iterator(strategy)
+
+        self.market.set_balance("HBOT", Decimal("50"))
+        # Exactly covers level 1's buy (1 HBOT @ 99 ETH); levels 2 and 3 are left starved.
+        self.market.set_balance("ETH", Decimal("99"))
+        self.clock.backtest_til(self.start_timestamp + 1)
+
+        self.assertEqual(1, len(strategy.active_buys))
+        warning_count = sum(
+            1 for r in self.log_records
+            if r.levelname == "WARNING" and "Insufficient ETH balance to place a buy order" in r.getMessage()
+        )
+        self.assertEqual(2, warning_count)
 
     def test_order_quantity_available_balance(self):
         """

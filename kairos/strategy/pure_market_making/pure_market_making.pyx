@@ -945,9 +945,22 @@ cdef class PureMarketMakingStrategy(StrategyBase):
             if quote_balance < quote_size:
                 adjusted_amount = quote_balance / (buy.price * (Decimal("1") + buy_fee.percent))
                 adjusted_amount = market.c_quantize_order_amount(self.trading_pair, adjusted_amount)
+                if adjusted_amount == s_decimal_zero:
+                    self.logger().warning(
+                        f"({self.trading_pair}) Insufficient {self.quote_asset} balance to place a buy order. "
+                        f"{quote_balance:.8g} {self.quote_asset} available vs. {quote_size:.8g} {self.quote_asset} "
+                        f"required. Skipping this buy order.")
+                else:
+                    self.logger().warning(
+                        f"({self.trading_pair}) Insufficient {self.quote_asset} balance for the full buy order. "
+                        f"Reducing size from {buy.size.normalize()} to {adjusted_amount.normalize()} "
+                        f"{self.base_asset}.")
                 buy.size = adjusted_amount
                 quote_balance = s_decimal_zero
             elif quote_balance == s_decimal_zero:
+                self.logger().warning(
+                    f"({self.trading_pair}) No {self.quote_asset} balance left to place a buy order. "
+                    f"Skipping this buy order.")
                 buy.size = s_decimal_zero
             else:
                 quote_balance -= quote_size
@@ -960,9 +973,22 @@ cdef class PureMarketMakingStrategy(StrategyBase):
             # Adjust sell order size to use remaining balance if less than the order amount
             if base_balance < base_size:
                 adjusted_amount = market.c_quantize_order_amount(self.trading_pair, base_balance)
+                if adjusted_amount == s_decimal_zero:
+                    self.logger().warning(
+                        f"({self.trading_pair}) Insufficient {self.base_asset} balance to place a sell order. "
+                        f"{base_balance:.8g} {self.base_asset} available vs. {base_size:.8g} {self.base_asset} "
+                        f"required. Skipping this sell order.")
+                else:
+                    self.logger().warning(
+                        f"({self.trading_pair}) Insufficient {self.base_asset} balance for the full sell order. "
+                        f"Reducing size from {base_size.normalize()} to {adjusted_amount.normalize()} "
+                        f"{self.base_asset}.")
                 sell.size = adjusted_amount
                 base_balance = s_decimal_zero
             elif base_balance == s_decimal_zero:
+                self.logger().warning(
+                    f"({self.trading_pair}) No {self.base_asset} balance left to place a sell order. "
+                    f"Skipping this sell order.")
                 sell.size = s_decimal_zero
             else:
                 base_balance -= base_size
