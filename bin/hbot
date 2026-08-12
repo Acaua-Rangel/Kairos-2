@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 """Launcher for the `hbot` CLI.
 
-Resolved on PATH inside the activated `hummingbot` conda env (the install script symlinks this
-into the env's bin directory). Uses `env python` so it runs against whichever environment is
-active, with the repo on sys.path via `conda develop`.
+The installed entry point is the `hbot` console script in .venv/bin (declared under
+[project.scripts] in pyproject.toml). This file stays as a direct launcher for running the
+CLI straight out of the checkout: `env python` picks up whichever environment is active, and
+importing path_util puts the repo root on sys.path.
 """
 import sys
 

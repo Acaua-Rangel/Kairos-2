@@ -1,5 +1,5 @@
 name: "Install environment and Hummingbot"
-description: "Installs conda environment, all libraries and compiles Hummingbot"
+description: "Creates the Poetry .venv, installs all libraries and compiles Hummingbot"
 inputs:
    program-cache-hit:
      required: true
@@ -10,25 +10,24 @@ inputs:
 runs:
   using: "composite"
   steps:
-    # Install python/conda to check if core code has changed
-    - uses: actions/setup-python@v4
+    # 3.12 is the floor the dependency set requires (pandas-ta needs >=3.12)
+    - uses: actions/setup-python@v5
       if: ${{inputs.program-cache-hit}} != 'true' || ${{inputs.dependencies-cache-hit}} != 'true'
       with:
-        python-version: 3.x
+        python-version: "3.12"
 
-    # Install pre_commit if code has changed
-    - name: Install pre_commit
+    - name: Install Poetry
       if: ${{inputs.program-cache-hit}} != 'true' || ${{inputs.dependencies-cache-hit}} != 'true'
       shell: bash
-      run: |
-        conda install -c conda-forge pre_commit
+      run: pipx install poetry==2.4.1
 
-    # Install hummingbot env if environment.yml has changed
-    - name: Install Hummingbot
+    # Install the locked dependency set (the .venv itself is cached by the caller)
+    - name: Install dependencies
       if: ${{inputs.dependencies-cache-hit}} != 'true'
-      shell: bash -l {0}
+      shell: bash
       run: |
-        ./install
+        poetry env use python3.12
+        poetry install --no-root --with dev
 
     # Compile and run tests if code has changed
     - name: Compile Hummingbot
@@ -37,8 +36,5 @@ runs:
       env:
         WITHOUT_CYTHON_OPTIMIZATIONS: 'true'
       run: |
-        source $CONDA/etc/profile.d/conda.sh
-        conda info --envs
-        conda activate hummingbot
-        conda env export
-        ./compile
+        poetry env info
+        poetry run pip install -e . --no-build-isolation --no-deps

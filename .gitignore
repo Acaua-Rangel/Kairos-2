@@ -49,6 +49,9 @@ portfolio_value.csv
 debug.log
 /installation/docker-commands/hummingbot_files
 
+# Virtualenv (Poetry is configured with virtualenvs.in-project in poetry.toml)
+/.venv
+
 # Distribution files
 /build
 /dist

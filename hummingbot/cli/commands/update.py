@@ -24,6 +24,9 @@ GIT_TIMEOUT = 120  # network fetch ceiling; the build step runs untimed (it legi
 # Changes to these require recompiling the extensions for the running install to match the code.
 COMPILED_SOURCES = ("*.pyx", "*.pxd", "setup.py")
 
+# Changes to these mean the .venv is stale and needs `make install` (a `poetry install`).
+DEPENDENCY_SOURCES = ("pyproject.toml", "poetry.lock")
+
 
 def _git(*args: str) -> str:
     """Run one git command in the repo root; fail the command with git's stderr on error."""
@@ -102,10 +105,10 @@ def update(
     if rebuilt:
         _rebuild_extensions()
 
-    env_changed = _git("diff", "--name-only", f"{local}..HEAD", "--", "setup/environment.yml")
+    env_changed = _git("diff", "--name-only", f"{local}..HEAD", "--", *DEPENDENCY_SOURCES)
     record: dict = {"version": f"{old_version} -> {_version()}", "branch": branch,
                     "updated": f"{local} -> {_git('rev-parse', '--short', 'HEAD')}",
                     "commits": behind, "extensions_rebuilt": rebuilt}
     if env_changed:
-        record["note"] = "setup/environment.yml changed — run `make install` to update the conda env"
+        record["note"] = "pyproject.toml/poetry.lock changed — run `make install` to update the .venv"
     emit(record, render_kv(record, title="update"), as_json)

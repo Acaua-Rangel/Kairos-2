@@ -11,3 +11,4 @@
 /conf/gateway_connections.json
 /conf/.password_verification
 /conf/connectors/*.yml
+/.venv

@@ -5,7 +5,7 @@ This guide outlines how to configure VS Code or Cursor to efficiently run and de
 **I. Prerequisites:**
 
 * **Hummingbot Repository:** You have cloned the Hummingbot repository to your local machine.
-* **Conda Environment:** You have created and activated the `hummingbot` Conda environment with all necessary dependencies installed.
+* **Virtual Environment:** You have run `make install`, which creates `./.venv` from `poetry.lock`, compiles the Cython extensions, and installs the project in editable mode.
 
 **II. Required Files and Configuration:**
 
@@ -15,11 +15,11 @@ Ensure the following files exist in your Hummingbot project directory with the s
 
 ```
 PYTHONPATH=${PYTHONPATH}:${PWD}
-CONDA_ENV=hummingbot
+VIRTUAL_ENV=${PWD}/.venv
 ```
 
 * **`PYTHONPATH`**: This ensures that Python can find the Hummingbot modules within your project directory.
-* **`CONDA_ENV`**: This variable can be used by other tools or scripts to identify the active Conda environment.
+* **`VIRTUAL_ENV`**: Points tools and scripts at the project's virtual environment.
 
 **2. `.vscode/settings.json` (Create this directory and file if it doesn't exist):**
 
@@ -73,18 +73,9 @@ CONDA_ENV=hummingbot
 2.  **Select the Python Interpreter:**
     * Open the Command Palette: Press `Ctrl+Shift+P` (Windows/Linux) or `Cmd+Shift+P` (macOS).
     * Type "Python: Select Interpreter" and press Enter.
-    * A list of available Python interpreters will appear. **Select the Python interpreter associated with your `hummingbot` Conda environment.** The path should typically include the name of your Conda environment.
+    * A list of available Python interpreters will appear. **Select `./.venv/bin/python`** — the interpreter `make install` created in the project directory. VS Code/Cursor usually offers it at the top of the list as a recommended workspace interpreter.
 
 3.  **Ensure `.env` is Loaded:** VS Code/Cursor should automatically load the `.env` file specified in `settings.json`. You can verify this by checking the Python environment variables within the IDE's terminal or debug configurations.
-
-4.  **Fix Test Discovery (Conda Environment Issue):**
-    * Open your terminal.
-    * Run the following commands to create a symbolic link to work around a known Conda environment detection issue:
-        ```bash
-        mkdir -p ~/anaconda3/envs/hummingbot/envs
-        ln -s ~/anaconda3/envs/hummingbot/ ~/anaconda3/envs/hummingbot/envs/hummingbot
-        ```
-        **Note:** Adjust `~/anaconda3/envs/hummingbot` to the actual path of your `hummingbot` Conda environment if it's located elsewhere.
 
 **IV. Running Tests:**
 

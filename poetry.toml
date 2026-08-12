@@ -1,0 +1,4 @@
+[virtualenvs]
+# Keep the environment inside the checkout as ./.venv, so tooling (IDEs, bin/hbot-host,
+# the Dockerfile) can find it at a fixed path without asking Poetry.
+in-project = true
