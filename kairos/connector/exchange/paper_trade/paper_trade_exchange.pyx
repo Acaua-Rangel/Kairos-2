@@ -192,6 +192,12 @@ cdef class PaperTradeExchange(ExchangeBase):
         # Orders that already crossed the spread when they were placed. They are takers, so they are
         # allowed to fill straight off the book without waiting for a print.
         self._crossing_orders = set()
+        # Round-trip time to the exchange. Zero means orders appear and disappear instantly, which
+        # is what the simulation did before this was configurable.
+        self._order_latency = 0.0
+        self._market_order_delay = self.TRADE_EXECUTION_DELAY
+        self._pending_submissions = deque()
+        self._pending_cancels = {}
         self._order_book_trade_listener = OrderBookTradeListener(self)
         self._target_market = target_market
         self._market_order_filled_listener = OrderBookMarketOrderFillListener(self)
@@ -213,6 +219,28 @@ cdef class PaperTradeExchange(ExchangeBase):
         if value not in FILL_MODELS:
             raise ValueError(f"Unknown paper trade fill model '{value}'. Expected one of {list(FILL_MODELS)}.")
         self._fill_model = value
+
+    @property
+    def order_latency(self) -> float:
+        """Round-trip time in seconds applied to sending and to cancelling a limit order."""
+        return self._order_latency
+
+    @order_latency.setter
+    def order_latency(self, value: float):
+        if value < 0:
+            raise ValueError(f"Order latency cannot be negative, got {value}.")
+        self._order_latency = value
+
+    @property
+    def market_order_delay(self) -> float:
+        """Seconds a market order waits before it is executed against the book."""
+        return self._market_order_delay
+
+    @market_order_delay.setter
+    def market_order_delay(self, value: float):
+        if value < 0:
+            raise ValueError(f"Market order delay cannot be negative, got {value}.")
+        self._market_order_delay = value
 
     @classmethod
     def random_order_id(cls, order_side: str, trading_pair: str) -> str:
@@ -355,6 +383,7 @@ cdef class PaperTradeExchange(ExchangeBase):
 
     cdef c_tick(self, double timestamp):
         ExchangeBase.c_tick(self, timestamp)
+        self.c_process_pending_actions(self._current_timestamp)
         self.c_process_market_orders()
         self.c_process_crossed_limit_orders()
 
@@ -398,6 +427,67 @@ cdef class PaperTradeExchange(ExchangeBase):
             return False
         return price >= opposite_price if is_buy else price <= opposite_price
 
+    cdef c_insert_limit_order(self,
+                              str order_id,
+                              str trading_pair_str,
+                              bint is_buy,
+                              object price,
+                              object amount):
+        """Put a limit order on the simulated book, capturing where in the queue it lands.
+
+        Called either straight from c_buy/c_sell or, when a send latency is configured, once that
+        latency has elapsed — which is the point of doing it here rather than inline: the queue
+        position and whether the order crosses are read from the book as it is *on arrival*, not as
+        it was when the order was sent.
+        """
+        cdef:
+            string cpp_order_id = order_id.encode("utf8")
+            string cpp_trading_pair_str = trading_pair_str.encode("utf8")
+            string cpp_base_asset = self._trading_pairs[trading_pair_str].base_asset.encode("utf8")
+            string cpp_quote_asset = self._trading_pairs[trading_pair_str].quote_asset.encode("utf8")
+            string cpp_position = "NIL".encode("utf8")
+            LimitOrders *limit_orders_map_ptr = (address(self._bid_limit_orders)
+                                                 if is_buy
+                                                 else address(self._ask_limit_orders))
+            LimitOrdersIterator map_it = limit_orders_map_ptr.find(cpp_trading_pair_str)
+            SingleTradingPairLimitOrders *limit_orders_collection_ptr = NULL
+            pair[LimitOrders.iterator, cppbool] insert_result
+
+        if map_it == limit_orders_map_ptr.end():
+            insert_result = limit_orders_map_ptr.insert(LimitOrdersPair(cpp_trading_pair_str,
+                                                                       SingleTradingPairLimitOrders()))
+            map_it = insert_result.first
+        self._queue_volume_ahead[order_id] = self.c_volume_ahead_of(trading_pair_str, is_buy, price)
+        if self.c_is_marketable(trading_pair_str, is_buy, price):
+            self._crossing_orders.add(order_id)
+        limit_orders_collection_ptr = address(deref(map_it).second)
+        limit_orders_collection_ptr.insert(CPPLimitOrder(
+            cpp_order_id,
+            cpp_trading_pair_str,
+            is_buy,
+            cpp_base_asset,
+            cpp_quote_asset,
+            <PyObject *> price,
+            <PyObject *> amount,
+            <PyObject *> None,
+            int(self._current_timestamp * 1e6),
+            0,
+            cpp_position,
+        ))
+
+    cdef c_submit_limit_order(self,
+                              str order_id,
+                              str trading_pair_str,
+                              bint is_buy,
+                              object price,
+                              object amount):
+        """Send a limit order, after the configured latency if there is one."""
+        if self._order_latency <= 0:
+            self.c_insert_limit_order(order_id, trading_pair_str, is_buy, price, amount)
+        else:
+            self._pending_submissions.append(
+                (self._current_timestamp + self._order_latency, order_id, trading_pair_str, is_buy, price, amount))
+
     cdef str c_buy(self,
                    str trading_pair_str,
                    object amount,
@@ -409,15 +499,6 @@ cdef class PaperTradeExchange(ExchangeBase):
 
         cdef:
             str order_id = self.random_order_id("buy", trading_pair_str)
-            str quote_asset = self._trading_pairs[trading_pair_str].quote_asset
-            string cpp_order_id = order_id.encode("utf8")
-            string cpp_trading_pair_str = trading_pair_str.encode("utf8")
-            string cpp_base_asset = self._trading_pairs[trading_pair_str].base_asset.encode("utf8")
-            string cpp_quote_asset = quote_asset.encode("utf8")
-            string cpp_position = "NIL".encode("utf8")
-            LimitOrdersIterator map_it
-            SingleTradingPairLimitOrders *limit_orders_collection_ptr = NULL
-            pair[LimitOrders.iterator, cppbool] insert_result
 
         quantized_price = (self.c_quantize_order_price(trading_pair_str, price)
                            if order_type is OrderType.LIMIT
@@ -427,30 +508,7 @@ cdef class PaperTradeExchange(ExchangeBase):
             self._queued_orders.append(QueuedOrder(self._current_timestamp, order_id, True, trading_pair_str,
                                                    quantized_amount))
         elif order_type is OrderType.LIMIT:
-
-            map_it = self._bid_limit_orders.find(cpp_trading_pair_str)
-
-            if map_it == self._bid_limit_orders.end():
-                insert_result = self._bid_limit_orders.insert(LimitOrdersPair(cpp_trading_pair_str,
-                                                                              SingleTradingPairLimitOrders()))
-                map_it = insert_result.first
-            self._queue_volume_ahead[order_id] = self.c_volume_ahead_of(trading_pair_str, True, quantized_price)
-            if self.c_is_marketable(trading_pair_str, True, quantized_price):
-                self._crossing_orders.add(order_id)
-            limit_orders_collection_ptr = address(deref(map_it).second)
-            limit_orders_collection_ptr.insert(CPPLimitOrder(
-                cpp_order_id,
-                cpp_trading_pair_str,
-                True,
-                cpp_base_asset,
-                cpp_quote_asset,
-                <PyObject *> quantized_price,
-                <PyObject *> quantized_amount,
-                <PyObject *> None,
-                int(self._current_timestamp * 1e6),
-                0,
-                cpp_position,
-            ))
+            self.c_submit_limit_order(order_id, trading_pair_str, True, quantized_price, quantized_amount)
         safe_ensure_future(self.trigger_event_async(
             self.MARKET_BUY_ORDER_CREATED_EVENT_TAG,
             BuyOrderCreatedEvent(self._current_timestamp,
@@ -473,15 +531,6 @@ cdef class PaperTradeExchange(ExchangeBase):
             raise ValueError(f"Trading pair '{trading_pair_str}' does not existing in current data set.")
         cdef:
             str order_id = self.random_order_id("sell", trading_pair_str)
-            str base_asset = self._trading_pairs[trading_pair_str].base_asset
-            string cpp_order_id = order_id.encode("utf8")
-            string cpp_trading_pair_str = trading_pair_str.encode("utf8")
-            string cpp_base_asset = base_asset.encode("utf8")
-            string cpp_quote_asset = self._trading_pairs[trading_pair_str].quote_asset.encode("utf8")
-            string cpp_position = "NIL".encode("utf8")
-            LimitOrdersIterator map_it
-            SingleTradingPairLimitOrders *limit_orders_collection_ptr = NULL
-            pair[LimitOrders.iterator, cppbool] insert_result
 
         quantized_price = (self.c_quantize_order_price(trading_pair_str, price)
                            if order_type is OrderType.LIMIT
@@ -491,29 +540,7 @@ cdef class PaperTradeExchange(ExchangeBase):
             self._queued_orders.append(QueuedOrder(self._current_timestamp, order_id, False, trading_pair_str,
                                                    quantized_amount))
         elif order_type is OrderType.LIMIT:
-            map_it = self._ask_limit_orders.find(cpp_trading_pair_str)
-
-            if map_it == self._ask_limit_orders.end():
-                insert_result = self._ask_limit_orders.insert(LimitOrdersPair(cpp_trading_pair_str,
-                                                                              SingleTradingPairLimitOrders()))
-                map_it = insert_result.first
-            self._queue_volume_ahead[order_id] = self.c_volume_ahead_of(trading_pair_str, False, quantized_price)
-            if self.c_is_marketable(trading_pair_str, False, quantized_price):
-                self._crossing_orders.add(order_id)
-            limit_orders_collection_ptr = address(deref(map_it).second)
-            limit_orders_collection_ptr.insert(CPPLimitOrder(
-                cpp_order_id,
-                cpp_trading_pair_str,
-                False,
-                cpp_base_asset,
-                cpp_quote_asset,
-                <PyObject *> quantized_price,
-                <PyObject *> quantized_amount,
-                <PyObject *> None,
-                int(self._current_timestamp * 1e6),
-                0,
-                cpp_position,
-            ))
+            self.c_submit_limit_order(order_id, trading_pair_str, False, quantized_price, quantized_amount)
         safe_ensure_future(self.trigger_event_async(
             self.MARKET_SELL_ORDER_CREATED_EVENT_TAG,
             SellOrderCreatedEvent(self._current_timestamp,
@@ -721,7 +748,7 @@ cdef class PaperTradeExchange(ExchangeBase):
             QueuedOrder front_order = None
         while len(self._queued_orders) > 0:
             front_order = self._queued_orders[0]
-            if front_order.create_timestamp <= self._current_timestamp - self.TRADE_EXECUTION_DELAY:
+            if front_order.create_timestamp <= self._current_timestamp - self._market_order_delay:
                 self._queued_orders.popleft()
                 try:
                     if front_order.is_buy:
@@ -747,6 +774,8 @@ cdef class PaperTradeExchange(ExchangeBase):
             self._queue_volume_ahead.pop(order_id, None)
             self._partial_fill_state.pop(order_id, None)
             self._crossing_orders.discard(order_id)
+            # An order that filled before its cancel arrived has nothing left to cancel.
+            self._pending_cancels.pop(order_id, None)
             if orders_collection_ptr.empty():
                 map_it_ptr[0] = limit_orders_map_ptr.erase(deref(map_it_ptr))
             return True
@@ -1147,6 +1176,12 @@ cdef class PaperTradeExchange(ExchangeBase):
             vector[SingleTradingPairLimitOrdersIterator] process_order_its
             const CPPLimitOrder *cpp_limit_order_ptr = NULL
 
+        # A print is the finest clock available here, so it is also where in-flight orders and
+        # cancels get a chance to arrive — at the print's own timestamp rather than the last tick.
+        if self._order_latency > 0:
+            self.c_process_pending_actions(max(self._current_timestamp, order_book_trade_event.timestamp))
+            map_it = limit_orders_map_ptr.find(cpp_trading_pair)
+
         if map_it == limit_orders_map_ptr.end():
             return
 
@@ -1198,6 +1233,10 @@ cdef class PaperTradeExchange(ExchangeBase):
         cdef:
             LimitOrders *limit_orders_map_ptr
             list cancellation_results = []
+        # Teardown path: drop anything still in flight rather than letting it land afterwards, and
+        # cancel without waiting out the latency.
+        self._pending_submissions.clear()
+        self._pending_cancels.clear()
         limit_orders_map_ptr = address(self._bid_limit_orders)
         for trading_pair_str in self._trading_pairs.keys():
             results = self.c_cancel_order_from_orders_map(limit_orders_map_ptr, trading_pair_str, cancel_all=True)
@@ -1251,15 +1290,51 @@ cdef class PaperTradeExchange(ExchangeBase):
             self.logger().error(f"Error canceling order.", exc_info=True)
 
     cdef c_cancel(self, str trading_pair_str, str client_order_id):
+        if self._order_latency > 0:
+            # The cancel is in flight: the order stays on the book, and stays fillable, until it
+            # arrives. This is where adverse selection shows up — the price runs against you, you
+            # pull the quote, and you get filled anyway on the way out.
+            self._pending_cancels[client_order_id] = (
+                self._current_timestamp + self._order_latency, trading_pair_str)
+            return
+        self.c_apply_cancel(trading_pair_str, client_order_id)
+
+    cdef c_apply_cancel(self, str trading_pair_str, str client_order_id):
         cdef:
-            string cpp_trading_pair = trading_pair_str.encode("utf8")
-            string cpp_client_order_id = client_order_id.encode("utf8")
             str trade_type = client_order_id.split("://")[0]
             bint is_maker_buy = trade_type.upper() == "BUY"
             LimitOrders *limit_orders_map_ptr = (address(self._bid_limit_orders)
                                                  if is_maker_buy
                                                  else address(self._ask_limit_orders))
         self.c_cancel_order_from_orders_map(limit_orders_map_ptr, trading_pair_str, False, client_order_id)
+
+    cdef c_process_pending_actions(self, double timestamp):
+        """Land orders and cancels whose flight time has elapsed.
+
+        Submissions are processed before cancels, which is what makes it safe to assume an order has
+        already landed by the time a cancel for it arrives: both carry the same latency, and a
+        cancel is always sent after its order.
+
+        Timing resolution is whatever drives this call. On a tick that is the clock's tick size, but
+        on a trade print it is the print's own timestamp, so sub-tick latency still bites. That is
+        the case that matters: whether an order sat on the book between two prints is unobservable,
+        because nothing can fill in between.
+        """
+        cdef:
+            tuple pending
+            list due
+        while len(self._pending_submissions) > 0:
+            pending = self._pending_submissions[0]
+            if pending[0] > timestamp:
+                break
+            self._pending_submissions.popleft()
+            self.c_insert_limit_order(pending[1], pending[2], pending[3], pending[4], pending[5])
+
+        if len(self._pending_cancels) > 0:
+            due = [order_id for order_id, entry in self._pending_cancels.items() if entry[0] <= timestamp]
+            for order_id in due:
+                trading_pair_str = self._pending_cancels.pop(order_id)[1]
+                self.c_apply_cancel(trading_pair_str, order_id)
 
     cdef object c_get_fee(self,
                           str base_asset,

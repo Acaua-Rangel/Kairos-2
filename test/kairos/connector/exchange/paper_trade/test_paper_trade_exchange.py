@@ -88,9 +88,12 @@ class PaperTradeMatchingTests(TestCase):
 
     def simulate_trade(self, is_buy: bool, quantity: Decimal, price: Decimal):
         """Push a single trade print into the book, which is what drives the event-driven fill path."""
+        self.simulate_trade_at(self.clock.current_timestamp, is_buy, quantity, price)
+
+    def simulate_trade_at(self, timestamp: float, is_buy: bool, quantity: Decimal, price: Decimal):
         self.market.get_order_book(self.trading_pair).apply_trade(OrderBookTradeEvent(
             self.trading_pair,
-            self.clock.current_timestamp,
+            timestamp,
             TradeType.BUY if is_buy else TradeType.SELL,
             price,
             quantity,
@@ -299,6 +302,131 @@ class PaperTradeMatchingTests(TestCase):
     def test_unknown_fill_model_is_rejected(self):
         with self.assertRaises(ValueError):
             self.market.fill_model = "wishful"
+
+    # </editor-fold>
+
+    # <editor-fold desc="Latency">
+
+    def test_latency_is_off_by_default(self):
+        self.assertEqual(0, self.market.order_latency)
+
+    def test_negative_latency_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.market.order_latency = -1
+
+    def test_an_order_in_flight_is_not_on_the_book_yet(self):
+        self.market.order_latency = 2
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("99"))
+
+        self.assertEqual(0, len(self.market.limit_orders))
+
+    def test_an_order_in_flight_cannot_be_filled(self):
+        self.market.order_latency = 2
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("99"))
+
+        self.simulate_trade(is_buy=False, quantity=Decimal("10"), price=Decimal("98.9"))
+
+        self.assertEqual(0, len(self.fill_logger.event_log))
+
+    def test_an_order_lands_once_its_flight_time_has_elapsed(self):
+        self.market.order_latency = 2
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("99"))
+
+        self.clock.backtest_til(self.start_timestamp + 3)
+        self.assertEqual(1, len(self.market.limit_orders))
+
+        self.simulate_trade(is_buy=False, quantity=Decimal("10"), price=Decimal("98.9"))
+        self.assertEqual(1, len(self.fill_logger.event_log))
+
+    def test_queue_position_is_read_from_the_book_on_arrival_not_on_send(self):
+        """The point of landing the order late: it queues behind the book as it is when it gets
+        there. Here the level fills up while the order is still in flight."""
+        self.market.order_latency = 2
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("99"))
+        # 30 units appear at 99 while the order is on its way.
+        order_book = self.market.get_order_book(self.trading_pair)
+        update_id = order_book.last_diff_uid + 1
+        order_book.apply_diffs([OrderBookRow(99.0, 30.0, update_id)], [], update_id)
+
+        self.clock.backtest_til(self.start_timestamp + 3)
+
+        # Had the queue been read at send time it would have been empty and this would fill.
+        self.simulate_trade(is_buy=False, quantity=Decimal("10"), price=Decimal("99"))
+        self.assertEqual(0, len(self.fill_logger.event_log))
+
+    def test_a_cancel_in_flight_leaves_the_order_fillable(self):
+        """Adverse selection: the price runs against you, you pull the quote, and you get filled
+        anyway on the way out."""
+        self.market.order_latency = 2
+        self.clock.backtest_til(self.start_timestamp + 1)
+        order_id = self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("99"))
+        self.clock.backtest_til(self.start_timestamp + 3)
+
+        self.market.cancel(self.trading_pair, order_id)
+        self.assertEqual(1, len(self.market.limit_orders))
+        self.assertEqual(0, len(self.cancel_logger.event_log))
+
+        self.simulate_trade(is_buy=False, quantity=Decimal("10"), price=Decimal("98.9"))
+
+        self.assertEqual(1, len(self.fill_logger.event_log))
+        self.assertEqual(0, len(self.cancel_logger.event_log))
+
+    def test_a_cancel_completes_once_its_flight_time_has_elapsed(self):
+        self.market.order_latency = 2
+        self.clock.backtest_til(self.start_timestamp + 1)
+        order_id = self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("99"))
+        self.clock.backtest_til(self.start_timestamp + 3)
+
+        self.market.cancel(self.trading_pair, order_id)
+        self.clock.backtest_til(self.start_timestamp + 6)
+
+        self.assertEqual(0, len(self.market.limit_orders))
+        self.assertEqual(1, len(self.cancel_logger.event_log))
+        self.assertEqual(order_id, self.cancel_logger.event_log[0].order_id)
+
+    def test_an_order_that_filled_before_its_cancel_arrived_is_not_cancelled_afterwards(self):
+        self.market.order_latency = 2
+        self.clock.backtest_til(self.start_timestamp + 1)
+        order_id = self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("99"))
+        self.clock.backtest_til(self.start_timestamp + 3)
+
+        self.market.cancel(self.trading_pair, order_id)
+        self.simulate_trade(is_buy=False, quantity=Decimal("10"), price=Decimal("98.9"))
+        self.clock.backtest_til(self.start_timestamp + 8)
+
+        self.assertEqual(1, len(self.fill_logger.event_log))
+        self.assertEqual(0, len(self.cancel_logger.event_log))
+
+    def test_a_print_lands_in_flight_orders_at_its_own_timestamp_not_the_last_tick(self):
+        """Sub-tick latency still bites, because a print carries a finer timestamp than the clock."""
+        self.market.order_latency = 0.2
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.LIMIT, Decimal("99"))
+
+        # 0.1s after the send: still in flight, so nothing to fill.
+        self.simulate_trade_at(self.clock.current_timestamp + 0.1,
+                               is_buy=False, quantity=Decimal("10"), price=Decimal("98.9"))
+        self.assertEqual(0, len(self.fill_logger.event_log))
+
+        # 0.3s after the send, and the clock has not ticked in between.
+        self.simulate_trade_at(self.clock.current_timestamp + 0.3,
+                               is_buy=False, quantity=Decimal("10"), price=Decimal("98.9"))
+        self.assertEqual(1, len(self.fill_logger.event_log))
+
+    def test_market_order_delay_is_configurable(self):
+        self.market.market_order_delay = 2
+        self.clock.backtest_til(self.start_timestamp + 1)
+        self.market.buy(self.trading_pair, Decimal("1"), OrderType.MARKET)
+
+        self.clock.backtest_til(self.start_timestamp + 2)
+        self.assertEqual(0, len(self.fill_logger.event_log))
+
+        self.clock.backtest_til(self.start_timestamp + 3)
+        self.assertLess(0, len(self.fill_logger.event_log))
 
     def test_trade_on_the_same_side_never_fills(self):
         """A buy print can only fill resting asks, and a sell print only resting bids."""

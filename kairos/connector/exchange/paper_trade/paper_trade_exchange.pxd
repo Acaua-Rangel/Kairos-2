@@ -44,6 +44,10 @@ cdef class PaperTradeExchange(ExchangeBase):
         dict _queue_volume_ahead
         dict _partial_fill_state
         set _crossing_orders
+        double _order_latency
+        double _market_order_delay
+        object _pending_submissions
+        dict _pending_cancels
 
     cdef c_execute_buy(self, str order_id, str trading_pair, object amount)
     cdef c_execute_sell(self, str order_id, str trading_pair, object amount)
@@ -51,6 +55,20 @@ cdef class PaperTradeExchange(ExchangeBase):
     cdef c_deduct_fee_collaterals(self, dict fee_collaterals)
     cdef object c_volume_ahead_of(self, str trading_pair_str, bint is_buy, object price)
     cdef bint c_is_marketable(self, str trading_pair_str, bint is_buy, object price)
+    cdef c_insert_limit_order(self,
+                              str order_id,
+                              str trading_pair_str,
+                              bint is_buy,
+                              object price,
+                              object amount)
+    cdef c_submit_limit_order(self,
+                              str order_id,
+                              str trading_pair_str,
+                              bint is_buy,
+                              object price,
+                              object amount)
+    cdef c_apply_cancel(self, str trading_pair_str, str client_order_id)
+    cdef c_process_pending_actions(self, double timestamp)
     cdef object c_fill_from_queue(self,
                                   bint is_buy,
                                   LimitOrders *limit_orders_map_ptr,
