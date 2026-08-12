@@ -75,8 +75,13 @@ class ConnectorManager:
                     trading_pairs
                 )
 
+                paper_trade_config = self.client_config_map.paper_trade
+                connector.fill_model = paper_trade_config.paper_trade_fill_model
+                connector.order_latency = paper_trade_config.paper_trade_latency_ms / 1000
+                connector.market_order_delay = paper_trade_config.paper_trade_market_order_delay
+
                 # Set paper trade balances if configured
-                paper_trade_account_balance = self.client_config_map.paper_trade.paper_trade_account_balance
+                paper_trade_account_balance = paper_trade_config.paper_trade_account_balance
                 if paper_trade_account_balance is not None:
                     for asset, balance in paper_trade_account_balance.items():
                         connector.set_balance(asset, balance)

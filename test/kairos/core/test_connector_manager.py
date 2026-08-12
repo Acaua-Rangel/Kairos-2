@@ -85,6 +85,24 @@ class ConnectorManagerTest(IsolatedAsyncioWrapperTestCase):
         # No credentials configured -> no real fee-probe connector should be involved.
         mock_env_api_keys.assert_called_once_with("binance")
 
+    @patch("kairos.core.connector_manager.env_api_keys")
+    @patch("kairos.core.connector_manager.create_paper_trade_market")
+    def test_paper_trade_simulation_settings_are_applied(self, mock_create_paper_trade, mock_env_api_keys):
+        """The fidelity knobs are on the client config, so they have to reach the connector."""
+        mock_env_api_keys.return_value = None
+        mock_create_paper_trade.return_value = self.mock_connector
+        paper_trade_config = self.client_config_adapter.paper_trade
+        paper_trade_config.paper_trade_fill_model = "optimistic"
+        paper_trade_config.paper_trade_latency_ms = 250
+        paper_trade_config.paper_trade_market_order_delay = 2.5
+
+        self.connector_manager.create_connector("binance_paper_trade", ["BTC-USDT"], trading_required=True)
+
+        self.assertEqual("optimistic", self.mock_connector.fill_model)
+        # Configured in milliseconds, applied in seconds.
+        self.assertEqual(0.25, self.mock_connector.order_latency)
+        self.assertEqual(2.5, self.mock_connector.market_order_delay)
+
     @patch("kairos.core.connector_manager.safe_ensure_future")
     @patch("kairos.core.connector_manager.get_connector_class")
     @patch("kairos.core.connector_manager.env_api_keys")

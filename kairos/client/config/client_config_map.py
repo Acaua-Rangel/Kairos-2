@@ -21,6 +21,11 @@ from kairos.connector.connector_metrics_collector import (
     TradeVolumeMetricCollector,
 )
 from kairos.connector.exchange.binance.binance_utils import BinanceConfigMap
+from kairos.connector.exchange.paper_trade.paper_trade_exchange import (
+    FILL_MODEL_OPTIMISTIC,
+    FILL_MODEL_QUEUE_POSITION,
+    FILL_MODELS,
+)
 from kairos.core.rate_oracle.rate_oracle import RATE_ORACLE_SOURCES, RateOracle
 from kairos.core.rate_oracle.sources.rate_source_base import RateSourceBase
 from kairos.core.utils.kill_switch import ActiveKillSwitch, KillSwitch, PassThroughKillSwitch
@@ -214,11 +219,50 @@ class PaperTradeConfigMap(BaseClientModel):
         )},
     )
 
+    paper_trade_fill_model: str = Field(
+        default=FILL_MODEL_QUEUE_POSITION,
+        description="How a simulated limit order is decided to have been filled."
+                    f"\n  {FILL_MODEL_QUEUE_POSITION}: the order queues behind the volume already resting at its"
+                    "\n    price, only fills against volume that actually trades there, and can fill partially."
+                    f"\n  {FILL_MODEL_OPTIMISTIC}: the legacy model — any print through the order's price fills it"
+                    "\n    whole regardless of volume, and the order also fills whenever the book merely reaches"
+                    "\n    its price with nothing having traded. Kept for comparison; it flatters results.",
+        json_schema_extra={"prompt": lambda cm: (
+            f"How should paper trade decide fills? ({' / '.join(FILL_MODELS)})"
+        )},
+    )
+    paper_trade_latency_ms: int = Field(
+        default=100,
+        ge=0,
+        description="Round trip to the exchange, in milliseconds, applied to sending and to cancelling an order."
+                    "\nA cancel in flight leaves the order fillable, which is what makes adverse selection show up."
+                    "\nResolution is bounded by whatever advances the simulation: on a clock tick that is tick_size,"
+                    "\nbut on a trade print it is the print's own timestamp, so sub-tick values still take effect.",
+        json_schema_extra={"prompt": lambda cm: (
+            "What order round trip (in milliseconds) should paper trade simulate?"
+        )},
+    )
+    paper_trade_market_order_delay: float = Field(
+        default=5.0,
+        ge=0,
+        description="Seconds a simulated market order waits before it is executed against the book.",
+        json_schema_extra={"prompt": lambda cm: (
+            "How long (in seconds) should a paper trade market order take to execute?"
+        )},
+    )
+
     @field_validator("paper_trade_account_balance", mode="before")
     @classmethod
     def validate_paper_trade_account_balance(cls, v: Union[str, Dict[str, float]]):
         if isinstance(v, str):
             v = json.loads(v)
+        return v
+
+    @field_validator("paper_trade_fill_model", mode="before")
+    @classmethod
+    def validate_paper_trade_fill_model(cls, v: str):
+        if v not in FILL_MODELS:
+            raise ValueError(f"Unknown paper trade fill model '{v}'. Expected one of {list(FILL_MODELS)}.")
         return v
 
 

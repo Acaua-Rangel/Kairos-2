@@ -232,6 +232,50 @@ started without them fails fast with exit code 4.
 
 ---
 
+## Paper trade: what it does and does not simulate
+
+`binance_paper_trade` runs your strategy against the **real, live Binance order book and trade feed**
+with simulated balances. Nothing is sent to the exchange, so nothing is at risk — but for the same
+reason, a profitable paper run is evidence, not proof.
+
+What is simulated:
+
+- **Real fees.** If Binance credentials are configured, paper trade fetches *your account's* actual
+  per-pair maker/taker rates in the background and books fills at those — including promos like
+  FDUSD's 0% maker. Without credentials it falls back to the exchange's published default schedule.
+- **Queue position.** A limit order records the volume already resting at its price level and has to
+  wait behind it. It only fills against volume that actually trades at that price, and it can fill
+  **partially**, staying on the book with the remainder.
+- **Latency.** Sending and cancelling an order both take a configurable round trip. A cancel in
+  flight leaves the order fillable, which is what makes *adverse selection* show up — the price runs
+  against you, you pull the quote, and you get filled anyway on the way out.
+
+What is **not** simulated, and cannot be:
+
+- **Market impact.** Your order never enters the real book, so it never pushes anyone away or draws
+  anyone in, and nobody reacts to it. Sizes small relative to the level you rest on are barely
+  affected; sizes that would visibly move the book are not trustworthy here at any setting.
+
+Settings live under `paper_trade` in `conf/conf_client.yml`:
+
+| setting | default | what it does |
+|---|---|---|
+| `paper_trade_fill_model` | `queue_position` | `optimistic` restores the old behaviour — any print through your price fills the whole order regardless of volume, and the order also fills whenever the book merely reaches its price with nothing having traded. Useful only as an A/B baseline; it flatters results. |
+| `paper_trade_latency_ms` | `100` | round trip applied to sending and cancelling |
+| `paper_trade_market_order_delay` | `5.0` | seconds a market order waits before executing |
+| `paper_trade_account_balance` | see file | starting simulated balances |
+
+Latency resolution is bounded by whatever advances the simulation: on a clock tick that is
+`tick_size` (1s by default, floor 0.1s), but on a trade print it is the print's own timestamp, so
+sub-tick values still take effect. That is the case that matters — whether an order sat on the book
+between two prints makes no difference when nothing could have filled in between.
+
+A useful sanity check is to run the same config twice, once with `paper_trade_fill_model:
+optimistic`. If the results are identical, the queue model is not biting — most likely your quotes
+sit at prices where nothing is resting, so there is no queue to wait behind.
+
+---
+
 ## Running in Podman
 
 > **Recommended for automated/agent-driven setup.** The image ships with the venv and compiled
