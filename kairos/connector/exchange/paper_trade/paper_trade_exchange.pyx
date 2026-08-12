@@ -498,12 +498,12 @@ cdef class PaperTradeExchange(ExchangeBase):
         fees = build_trade_fee(
             exchange=self.name,
             is_maker=False,
-            base_currency="",
-            quote_currency="",
-            order_type=OrderType.LIMIT,
+            base_currency=base_asset,
+            quote_currency=quote_asset,
+            order_type=OrderType.MARKET,
             order_side=TradeType.BUY,
-            amount=Decimal("0"),
-            price=Decimal("0"),
+            amount=amount,
+            price=avg_price,
         )
 
         order_filled_events = OrderFilledEvent.order_filled_events_from_order_book_rows(
@@ -580,12 +580,12 @@ cdef class PaperTradeExchange(ExchangeBase):
         fees = build_trade_fee(
             exchange=self.name,
             is_maker=False,
-            base_currency="",
-            quote_currency="",
-            order_type=OrderType.LIMIT,
-            order_side=TradeType.BUY,
-            amount=Decimal("0"),
-            price=Decimal("0"),
+            base_currency=base_asset,
+            quote_currency=quote_asset,
+            order_type=OrderType.MARKET,
+            order_side=TradeType.SELL,
+            amount=amount,
+            price=avg_price,
         )
 
         order_filled_events = OrderFilledEvent.order_filled_events_from_order_book_rows(
@@ -693,12 +693,12 @@ cdef class PaperTradeExchange(ExchangeBase):
         fees = build_trade_fee(
             exchange=self.name,
             is_maker=True,
-            base_currency="",
-            quote_currency="",
+            base_currency=base_asset,
+            quote_currency=quote_asset,
             order_type=OrderType.LIMIT,
             order_side=TradeType.BUY,
-            amount=Decimal("0"),
-            price=Decimal("0"),
+            amount=amount,
+            price=price,
         )
 
         # Emit the trade and order completed events.
@@ -784,12 +784,12 @@ cdef class PaperTradeExchange(ExchangeBase):
         fees = build_trade_fee(
             exchange=self.name,
             is_maker=True,
-            base_currency="",
-            quote_currency="",
+            base_currency=base_asset,
+            quote_currency=quote_asset,
             order_type=OrderType.LIMIT,
             order_side=TradeType.SELL,
-            amount=Decimal("0"),
-            price=Decimal("0"),
+            amount=amount,
+            price=price,
         )
 
         # Emit the trade and order completed events.
