@@ -203,10 +203,8 @@ class PaperTradeMatchingTests(TestCase):
         self.simulate_trade(is_buy=False, quantity=Decimal("1"), price=Decimal("98.9"))
 
         self.assertEqual(Decimal("501"), self.market.get_balance(self.base_asset))
-        # BUG (characterized here, fixed in the next commit): only the raw notional is debited.
-        # For a buy the percent fee lands in the candidate's `percent_fee_collateral`, which the
-        # paper trade never reads, so the 0.099 maker fee is silently not charged.
-        self.assertEqual(Decimal("4901"), self.market.get_balance(self.quote_asset))
+        # 99 for the base, plus the 0.1% maker fee added on top of the cost.
+        self.assertEqual(Decimal("4900.901"), self.market.get_balance(self.quote_asset))
         self.assertEqual(1, len(self.complete_logger.event_log))
         self.assertEqual(0, len(self.cancel_logger.event_log))
 
@@ -311,5 +309,7 @@ class PaperTradeMatchingTests(TestCase):
         self.simulate_trade(is_buy=False, quantity=Decimal("1"), price=Decimal("98.9"))
 
         self.assertEqual(Decimal("0"), self.fill_logger.event_log[0].trade_fee.percent)
+        # ...and with no fee the cost is exactly the notional, with no 0.099 skim.
+        self.assertEqual(Decimal("4901"), self.market.get_balance(self.quote_asset))
 
     # </editor-fold>

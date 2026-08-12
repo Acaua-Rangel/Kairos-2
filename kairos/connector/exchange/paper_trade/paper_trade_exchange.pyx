@@ -472,8 +472,9 @@ cdef class PaperTradeExchange(ExchangeBase):
 
         adjusted_order_candidate = self._budget_checker.populate_collateral_entries(order_candidate)
 
+        fee_collaterals = self.c_fee_collaterals(adjusted_order_candidate)
         # Quote currency used, including fees.
-        paid_amount = adjusted_order_candidate.order_collateral.amount
+        paid_amount = adjusted_order_candidate.order_collateral.amount + fee_collaterals.pop(quote_asset, s_decimal_0)
         # Base currency acquired, including fees.
         acquired_amount = adjusted_order_candidate.potential_returns.amount
 
@@ -493,6 +494,7 @@ cdef class PaperTradeExchange(ExchangeBase):
                            quote_balance - paid_amount)
         self.c_set_balance(base_asset,
                            base_balance + acquired_amount)
+        self.c_deduct_fee_collaterals(fee_collaterals)
 
         # add fee
         fees = build_trade_fee(
@@ -554,8 +556,9 @@ cdef class PaperTradeExchange(ExchangeBase):
 
         adjusted_order_candidate = self._budget_checker.populate_collateral_entries(order_candidate)
 
+        fee_collaterals = self.c_fee_collaterals(adjusted_order_candidate)
         # Base currency used, including fees.
-        sold_amount = adjusted_order_candidate.order_collateral.amount
+        sold_amount = adjusted_order_candidate.order_collateral.amount + fee_collaterals.pop(base_asset, s_decimal_0)
         # Quote currency acquired, including fees.
         acquired_amount = adjusted_order_candidate.potential_returns.amount
 
@@ -575,6 +578,7 @@ cdef class PaperTradeExchange(ExchangeBase):
                            quote_balance + acquired_amount)
         self.c_set_balance(base_asset,
                            base_balance - sold_amount)
+        self.c_deduct_fee_collaterals(fee_collaterals)
 
         # add fee
         fees = build_trade_fee(
@@ -605,6 +609,29 @@ cdef class PaperTradeExchange(ExchangeBase):
                                     sold_amount,
                                     acquired_amount,
                                     OrderType.MARKET))
+
+    cdef dict c_fee_collaterals(self, object order_candidate):
+        """What the trade costs on top of its notional, as {token: amount}.
+
+        An order candidate reports its cost in three parts: the notional (`order_collateral`), the
+        percent fee and any flat fees. Only the notional is implied by the fill price, so the other
+        two have to be debited explicitly. Skipping them means a buy pays no fee at all — for buys
+        the percent fee is an added cost rather than a deduction from what is received, so it never
+        shows up in `potential_returns` the way a sell's fee does.
+        """
+        cdef dict collaterals = {}
+        if order_candidate.percent_fee_collateral is not None:
+            token, amount = order_candidate.percent_fee_collateral
+            collaterals[token] = collaterals.get(token, s_decimal_0) + amount
+        for token, amount in order_candidate.fixed_fee_collaterals:
+            collaterals[token] = collaterals.get(token, s_decimal_0) + amount
+        return collaterals
+
+    cdef c_deduct_fee_collaterals(self, dict fee_collaterals):
+        """Debit fee collaterals denominated in something other than the traded pair's own
+        settlement asset (e.g. a fee discount token), which the fill itself does not account for."""
+        for token, amount in fee_collaterals.items():
+            self.c_set_balance(token, self.c_get_balance(token) - amount)
 
     cdef c_process_market_orders(self):
         cdef:
@@ -665,8 +692,9 @@ cdef class PaperTradeExchange(ExchangeBase):
 
         adjusted_order_candidate = self._budget_checker.populate_collateral_entries(order_candidate)
 
+        fee_collaterals = self.c_fee_collaterals(adjusted_order_candidate)
         # Quote currency used, including fees.
-        paid_amount = adjusted_order_candidate.order_collateral.amount
+        paid_amount = adjusted_order_candidate.order_collateral.amount + fee_collaterals.pop(quote_asset, s_decimal_0)
         # Base currency acquired, including fees.
         acquired_amount = adjusted_order_candidate.potential_returns.amount
 
@@ -688,6 +716,7 @@ cdef class PaperTradeExchange(ExchangeBase):
                            quote_balance - paid_amount)
         self.c_set_balance(base_asset,
                            base_balance + acquired_amount)
+        self.c_deduct_fee_collaterals(fee_collaterals)
 
         # add fee
         fees = build_trade_fee(
@@ -757,8 +786,9 @@ cdef class PaperTradeExchange(ExchangeBase):
 
         adjusted_order_candidate = self._budget_checker.populate_collateral_entries(order_candidate)
 
+        fee_collaterals = self.c_fee_collaterals(adjusted_order_candidate)
         # Base currency used, including fees.
-        sold_amount = adjusted_order_candidate.order_collateral.amount
+        sold_amount = adjusted_order_candidate.order_collateral.amount + fee_collaterals.pop(base_asset, s_decimal_0)
         # Quote currency acquired, including fees.
         acquired_amount = adjusted_order_candidate.potential_returns.amount
 
@@ -779,6 +809,7 @@ cdef class PaperTradeExchange(ExchangeBase):
                            quote_balance + acquired_amount)
         self.c_set_balance(base_asset,
                            base_balance - sold_amount)
+        self.c_deduct_fee_collaterals(fee_collaterals)
 
         # add fee
         fees = build_trade_fee(

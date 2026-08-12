@@ -43,6 +43,8 @@ cdef class PaperTradeExchange(ExchangeBase):
 
     cdef c_execute_buy(self, str order_id, str trading_pair, object amount)
     cdef c_execute_sell(self, str order_id, str trading_pair, object amount)
+    cdef dict c_fee_collaterals(self, object order_candidate)
+    cdef c_deduct_fee_collaterals(self, dict fee_collaterals)
     cdef c_process_market_orders(self)
     cdef c_set_balance(self, str currency, object amount)
     cdef object c_get_fee(self,
