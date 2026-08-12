@@ -126,7 +126,10 @@ class StrategyConfigHelpersTest(unittest.TestCase):
         config_map = get_strategy_config_map("pure_market_making")
         data, required = template_legacy_data(config_map)
         self.assertEqual(data["strategy"], "pure_market_making")
-        self.assertIn("exchange", required)
+        # exchange has a default (this fork is Binance-only) so it's deliberately not required;
+        # market has none, and still proves the function ran to completion without crashing on the
+        # fields above whose required_if lambdas raise when read this early.
+        self.assertIn("market", required)
 
     def test_available_sources(self):
         from kairos.cli.strategy_configs import available_sources

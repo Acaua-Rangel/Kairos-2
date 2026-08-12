@@ -2,11 +2,7 @@ from pydantic import Field, field_validator
 from pydantic_core.core_schema import ValidationInfo
 
 from kairos.client.config.config_data_types import BaseClientModel, ClientConfigEnum
-from kairos.client.config.config_validators import (
-    validate_exchange,
-    validate_market_trading_pair,
-    validate_strategy,
-)
+from kairos.client.config.config_validators import validate_exchange, validate_market_trading_pair, validate_strategy
 from kairos.client.settings import AllConnectorSettings
 
 
@@ -29,8 +25,10 @@ class BaseStrategyConfigMap(BaseClientModel):
 
 
 class BaseTradingStrategyConfigMap(BaseStrategyConfigMap):
+    # This fork is Binance-only (see validate_exchange / get_exchange_names): there is never a real
+    # choice to make here, so defaulting it means `hbot create` never has to ask for it.
     exchange: str = Field(
-        default=...,
+        default="binance",
         description="The name of the exchange connector.",
         json_schema_extra={"prompt": "Input your maker spot connector", "prompt_on_new": True},
     )
@@ -61,44 +59,6 @@ class BaseTradingStrategyConfigMap(BaseStrategyConfigMap):
     def validate_exchange_trading_pair(cls, v: str, validation_info: ValidationInfo):
         exchange = validation_info.data.get("exchange")
         ret = validate_market_trading_pair(exchange, v)
-        if ret is not None:
-            raise ValueError(ret)
-        return v
-
-
-class BaseTradingStrategyMakerTakerConfigMap(BaseStrategyConfigMap):
-    maker_market: str = Field(
-        default=...,
-        description="The name of the maker exchange connector.",
-        json_schema_extra={"prompt": "Enter your maker spot connector", "prompt_on_new": True},
-    )
-    taker_market: str = Field(
-        default=...,
-        description="The name of the taker exchange connector.",
-        json_schema_extra={"prompt": "Enter your taker spot connector", "prompt_on_new": True},
-    )
-    maker_market_trading_pair: str = Field(
-        default=...,
-        description="The name of the maker trading pair.",
-        json_schema_extra={"prompt": "Enter the token trading pair you would like to trade on maker market: (e.g. BTC-USDT)",
-                           "prompt_on_new": True},
-    )
-    taker_market_trading_pair: str = Field(
-        default=...,
-        description="The name of the taker trading pair.",
-        json_schema_extra={"prompt": "Enter the token trading pair you would like to trade on maker market: (e.g. BTC-USDT)",
-                           "prompt_on_new": True},
-    )
-
-    @field_validator("maker_market_trading_pair", "taker_market_trading_pair", mode="before")
-    def validate_exchange_trading_pair(cls, v: str, validation_info: ValidationInfo):
-        ret = None
-        if validation_info.field_name == "maker_market_trading_pair":
-            exchange = validation_info.data.get("maker_market")
-            ret = validate_market_trading_pair(exchange, v)
-        if validation_info.field_name == "taker_market_trading_pair":
-            exchange = validation_info.data.get("taker_market")
-            ret = validate_market_trading_pair(exchange, v)
         if ret is not None:
             raise ValueError(ret)
         return v

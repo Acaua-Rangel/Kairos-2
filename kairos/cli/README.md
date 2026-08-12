@@ -158,9 +158,11 @@ be a creatable strategy name, with every required field supplied via `--set` / `
 Every `create`/`deploy` command below is a complete, ready-to-run config (no leftover
 `required_remaining` fields) — copy one as-is or swap in your own `market`/`trading_pair`. Amounts
 are kept deliberately tiny; scale them up once you've watched a config run and are happy with it.
-Two are shown against `binance_paper_trade` since that's what they default to and there's no reason
-to risk funds while trying the shape of a config out; swap `exchange`/`connector_name` for `binance`
-(spot, no leverage) to run for real. `pmm_dynamic` and `dman_maker_v2` default to
+V1 strategies default `exchange` to `binance` — the only value this fork's spot-only `exchange`
+field ever accepts — so `--set exchange=...` is never required for them.
+Two examples below are shown against `binance_paper_trade` since that's what they default to and
+there's no reason to risk funds while trying the shape of a config out; swap `connector_name` for
+`binance` (spot, no leverage) to run for real. `pmm_dynamic` and `dman_maker_v2` default to
 `binance_perpetual` with 20x leverage — halve or zero that before running either live.
 
 **`pure_market_making`** (V1 strategy, `conf/strategies/`) — the classic single-pair market maker.
@@ -168,7 +170,7 @@ Not live-tunable; changing a spread means editing the file and restarting.
 
 ```bash
 hbot create pure_market_making --name conf_pmm.yml \
-    --set exchange=binance --set market=BTC-USDT \
+    --set market=BTC-USDT \
     --set bid_spread=0.5 --set ask_spread=0.5 \
     --set order_refresh_time=30 --set order_amount=0.0001
 hbot start
@@ -181,7 +183,7 @@ the other two modes' fields).
 
 ```bash
 hbot create avellaneda_market_making --name conf_avellaneda.yml \
-    --set exchange=binance --set market=BTC-USDT \
+    --set market=BTC-USDT \
     --set execution_timeframe_mode=infinite \
     --set order_amount=0.0001 --set order_refresh_time=30
 hbot start

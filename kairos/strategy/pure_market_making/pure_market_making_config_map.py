@@ -123,8 +123,11 @@ pure_market_making_config_map = {
                   prompt=None,
                   default="pure_market_making"),
     "exchange":
+        # This fork is Binance-only (see validate_exchange), so there's never a real choice to make
+        # here — default it so `hbot create` never has to ask.
         ConfigVar(key="exchange",
                   prompt="Enter your maker spot connector >>> ",
+                  default="binance",
                   validator=validate_exchange,
                   on_validated=exchange_on_validated,
                   prompt_on_new=True),
