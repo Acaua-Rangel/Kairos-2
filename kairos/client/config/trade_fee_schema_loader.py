@@ -20,6 +20,15 @@ class TradeFeeSchemaLoader:
         return trade_fee_schema
 
     @classmethod
+    def has_percent_fee_override(cls, exchange: str, is_maker: bool) -> bool:
+        """Whether the user has manually pinned this exchange's maker/taker percent fee in
+        conf_fee_overrides.yml. Callers use this to give the manual override precedence over any
+        real per-pair rate published by the connector (see TradeFeeRegistry)."""
+        key = f"{exchange}_{'maker' if is_maker else 'taker'}_percent_fee"
+        config = fee_overrides_config_map.get(key)
+        return config is not None and config.value is not None
+
+    @classmethod
     def _superimpose_overrides(cls, exchange: str, trade_fee_schema: TradeFeeSchema):
         percent_fee_token_config = fee_overrides_config_map.get(f"{exchange}_percent_fee_token")
         trade_fee_schema.percent_fee_token = (

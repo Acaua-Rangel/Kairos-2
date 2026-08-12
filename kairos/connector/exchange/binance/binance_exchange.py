@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from bidict import bidict
 
-from kairos.connector.constants import s_decimal_NaN
+from kairos.connector.constants import MINUTE, s_decimal_NaN
 from kairos.connector.exchange.binance import (
     binance_constants as CONSTANTS,
     binance_utils,
@@ -19,16 +19,27 @@ from kairos.connector.utils import TradeFillOrderDetails, combine_to_hb_trading_
 from kairos.core.data_type.common import OrderType, TradeType
 from kairos.core.data_type.in_flight_order import InFlightOrder, OrderUpdate, TradeUpdate
 from kairos.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
-from kairos.core.data_type.trade_fee import DeductedFromReturnsTradeFee, TokenAmount, TradeFeeBase
+from kairos.core.data_type.trade_fee import (
+    DeductedFromReturnsTradeFee,
+    MakerTakerExchangeFeeRates,
+    TokenAmount,
+    TradeFeeBase,
+)
+from kairos.core.data_type.trade_fee_registry import TradeFeeRegistry
 from kairos.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
 from kairos.core.event.events import MarketEvent, OrderFilledEvent
 from kairos.core.utils.async_utils import safe_gather
+from kairos.core.utils.estimate_fee import build_trade_fee
 from kairos.core.web_assistant.connections.data_types import RESTMethod
 from kairos.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 
 
 class BinanceExchange(ExchangePyBase):
     UPDATE_ORDER_STATUS_MIN_INTERVAL = 10.0
+    # Real per-pair fee rates change rarely (VIP tier changes, promos like FDUSD's 0% maker), but a
+    # tighter refresh than the inherited 12h default catches them sooner without meaningful extra
+    # weight (this endpoint costs 1 request-weight per call, and it's a single call for all pairs).
+    TRADING_FEES_INTERVAL = 60 * MINUTE
 
     web_utils = web_utils
 
@@ -165,8 +176,9 @@ class BinanceExchange(ExchangePyBase):
                  amount: Decimal,
                  price: Decimal = s_decimal_NaN,
                  is_maker: Optional[bool] = None) -> TradeFeeBase:
-        is_maker = order_type is OrderType.LIMIT_MAKER
-        return DeductedFromReturnsTradeFee(percent=self.estimate_fee_pct(is_maker))
+        is_maker = is_maker if is_maker is not None else order_type.is_limit_type()
+        return build_trade_fee(self.name, is_maker, base_currency, quote_currency,
+                               order_type, order_side, amount, price)
 
     async def _place_order(self,
                            order_id: str,
@@ -282,9 +294,41 @@ class BinanceExchange(ExchangePyBase):
 
     async def _update_trading_fees(self):
         """
-        Update fees information from the exchange
+        Fetch this account's real maker/taker fee rate for every trading pair from Binance
+        (GET /sapi/v1/asset/tradeFee — one call returns every symbol, e.g. any 0% maker promo on
+        FDUSD pairs shows up here) and publish them to TradeFeeRegistry, so build_trade_fee() uses
+        the real rate instead of the static default schema. Never raises: on any failure this just
+        leaves the previous rates (or the static schema, on first run) in place.
         """
-        pass
+        try:
+            response = await self._api_get(
+                path_url=CONSTANTS.TRADE_FEE_PATH_URL,
+                overwrite_url=web_utils.sapi_rest_url(CONSTANTS.TRADE_FEE_PATH_URL, domain=self._domain),
+                limit_id=CONSTANTS.TRADE_FEE_PATH_URL,
+                is_auth_required=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.logger().network(
+                "Error fetching trading fees from Binance.", exc_info=True,
+                app_warning_msg="Could not fetch real trading fees from Binance; "
+                                "using the default fee schema instead.")
+            return
+
+        symbol_map = await self.trading_pair_symbol_map()
+        rates: Dict[str, MakerTakerExchangeFeeRates] = {}
+        for entry in response:
+            trading_pair = symbol_map.get(entry.get("symbol"))
+            if trading_pair is None or trading_pair not in self.trading_pairs:
+                continue  # not one of the pairs this bot is configured to trade
+            maker = Decimal(str(entry["makerCommission"]))
+            taker = Decimal(str(entry["takerCommission"]))
+            rates[trading_pair] = MakerTakerExchangeFeeRates(
+                maker=maker, taker=taker, maker_flat_fees=[], taker_flat_fees=[])
+            self.logger().info(f"Binance trade fee for {trading_pair}: maker={maker} taker={taker}")
+
+        self._trading_fees = rates
+        TradeFeeRegistry.set_rates(self.name, rates)
 
     async def _user_stream_event_listener(self):
         """

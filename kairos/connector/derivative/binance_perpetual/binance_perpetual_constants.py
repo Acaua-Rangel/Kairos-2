@@ -54,6 +54,9 @@ DELETE_ORDER_LIMIT_ID = f"DELETE{ORDER_URL}"
 ACCOUNT_INFO_URL = "v2/account"
 POSITION_INFORMATION_URL = "v2/positionRisk"
 
+# Private API v1 Endpoints (fees) — per-symbol, GET only
+COMMISSION_RATE_URL = "v1/commissionRate"
+
 # Private API Endpoints
 BINANCE_USER_STREAM_ENDPOINT = "v1/listenKey"
 
@@ -141,6 +144,8 @@ RATE_LIMITS = [
               linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, weight=5)]),
     RateLimit(limit_id=MARK_PRICE_URL, limit=MAX_REQUEST, time_interval=ONE_MINUTE, weight=1,
               linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, weight=1)]),
+    RateLimit(limit_id=COMMISSION_RATE_URL, limit=MAX_REQUEST, time_interval=ONE_MINUTE,
+              linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, weight=20)]),
 ]
 
 ORDER_NOT_EXIST_ERROR_CODE = -2013

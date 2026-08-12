@@ -29,6 +29,17 @@ def private_rest_url(path_url: str, domain: str = CONSTANTS.DEFAULT_DOMAIN) -> s
     return CONSTANTS.REST_URL.format(domain) + CONSTANTS.PRIVATE_API_VERSION + path_url
 
 
+def sapi_rest_url(path_url: str, domain: str = CONSTANTS.DEFAULT_DOMAIN) -> str:
+    """
+    Creates a full URL for provided SAPI endpoint (a different base path than /api/v3, e.g. the
+    account trade-fee endpoint).
+    :param path_url: a SAPI endpoint
+    :param domain: the Binance domain to connect to ("com" or "us"). The default value is "com"
+    :return: the full URL to the endpoint
+    """
+    return CONSTANTS.SAPI_REST_URL.format(domain) + CONSTANTS.SAPI_VERSION + path_url
+
+
 def build_api_factory(
         throttler: Optional[AsyncThrottler] = None,
         time_synchronizer: Optional[TimeSynchronizer] = None,

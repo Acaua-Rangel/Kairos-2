@@ -8,11 +8,13 @@ MAX_ORDER_ID_LEN = 32
 
 # Base URL
 REST_URL = "https://api.binance.{}/api/"
+SAPI_REST_URL = "https://api.binance.{}/sapi/"
 WSS_URL = "wss://stream.binance.{}:9443/ws"
 WSS_API_URL = "wss://ws-api.binance.{}:443/ws-api/v3"
 
 PUBLIC_API_VERSION = "v3"
 PRIVATE_API_VERSION = "v3"
+SAPI_VERSION = "v1"
 
 # Public API endpoints or BinanceClient function
 TICKER_PRICE_CHANGE_PATH_URL = "/ticker/24hr"
@@ -28,6 +30,9 @@ ACCOUNTS_PATH_URL = "/account"
 MY_TRADES_PATH_URL = "/myTrades"
 ORDER_PATH_URL = "/order"
 WS_HEARTBEAT_TIME_INTERVAL = 30
+
+# SAPI endpoints (a different base URL/version than the rest of this file — see SAPI_REST_URL)
+TRADE_FEE_PATH_URL = "/asset/tradeFee"
 
 # Binance params
 
@@ -101,6 +106,9 @@ RATE_LIMITS = [
                              LinkedLimitWeightPair(RAW_REQUESTS, 1)]),
     RateLimit(limit_id=MY_TRADES_PATH_URL, limit=MAX_REQUEST, time_interval=ONE_MINUTE,
               linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20),
+                             LinkedLimitWeightPair(RAW_REQUESTS, 1)]),
+    RateLimit(limit_id=TRADE_FEE_PATH_URL, limit=MAX_REQUEST, time_interval=ONE_MINUTE,
+              linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 1),
                              LinkedLimitWeightPair(RAW_REQUESTS, 1)]),
     RateLimit(limit_id=ORDER_PATH_URL, limit=MAX_REQUEST, time_interval=ONE_MINUTE,
               linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 4),

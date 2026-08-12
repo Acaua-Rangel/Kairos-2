@@ -26,10 +26,11 @@ from kairos.core.api_throttler.data_types import RateLimit
 from kairos.core.data_type.common import OrderType, PositionAction, PositionMode, PositionSide, TradeType
 from kairos.core.data_type.in_flight_order import InFlightOrder, OrderUpdate, TradeUpdate
 from kairos.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
-from kairos.core.data_type.trade_fee import TokenAmount, TradeFeeBase
+from kairos.core.data_type.trade_fee import MakerTakerExchangeFeeRates, TokenAmount, TradeFeeBase
+from kairos.core.data_type.trade_fee_registry import TradeFeeRegistry
 from kairos.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
 from kairos.core.utils.async_utils import safe_gather
-from kairos.core.utils.estimate_fee import build_trade_fee
+from kairos.core.utils.estimate_fee import build_perpetual_trade_fee
 from kairos.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 
 bpm_logger = None
@@ -40,6 +41,9 @@ class BinancePerpetualDerivative(PerpetualDerivativePyBase):
     SHORT_POLL_INTERVAL = 5.0
     UPDATE_ORDER_STATUS_MIN_INTERVAL = 10.0
     LONG_POLL_INTERVAL = 120.0
+    # See BinanceExchange.TRADING_FEES_INTERVAL — same reasoning, shorter than the inherited 12h
+    # default so a VIP tier change is picked up within the hour instead of half a day.
+    TRADING_FEES_INTERVAL = 60 * 60
 
     def __init__(
             self,
@@ -181,10 +185,11 @@ class BinancePerpetualDerivative(PerpetualDerivativePyBase):
                  amount: Decimal,
                  price: Decimal = s_decimal_NaN,
                  is_maker: Optional[bool] = None) -> TradeFeeBase:
-        is_maker = is_maker or False
-        fee = build_trade_fee(
+        is_maker = is_maker if is_maker is not None else order_type.is_limit_type()
+        fee = build_perpetual_trade_fee(
             self.name,
             is_maker,
+            position_action,
             base_currency=base_currency,
             quote_currency=quote_currency,
             order_type=order_type,
@@ -196,9 +201,49 @@ class BinancePerpetualDerivative(PerpetualDerivativePyBase):
 
     async def _update_trading_fees(self):
         """
-        Update fees information from the exchange
+        Fetch this account's real maker/taker fee rate for every trading pair this connector is
+        configured to trade (GET /fapi/v1/commissionRate — per-symbol, so this fans out one call
+        per pair) and publish them to TradeFeeRegistry, so build_perpetual_trade_fee() uses the
+        real rate instead of the static default schema. A single pair's failure doesn't drop the
+        others; on any given refresh, unaffected pairs keep their previously known rate.
         """
-        pass
+        trading_pairs = self.trading_pairs
+        symbols = await safe_gather(
+            *(self.exchange_symbol_associated_to_pair(trading_pair=tp) for tp in trading_pairs),
+            return_exceptions=True)
+
+        async def _fetch(trading_pair: str, symbol: Any):
+            if isinstance(symbol, Exception):
+                return trading_pair, symbol
+            try:
+                response = await self._api_get(
+                    path_url=CONSTANTS.COMMISSION_RATE_URL,
+                    params={"symbol": symbol},
+                    is_auth_required=True)
+                return trading_pair, response
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                return trading_pair, e
+
+        results = await safe_gather(*(_fetch(tp, sym) for tp, sym in zip(trading_pairs, symbols)))
+
+        rates: Dict[str, MakerTakerExchangeFeeRates] = dict(self._trading_fees)
+        for trading_pair, result in results:
+            if isinstance(result, Exception):
+                self.logger().network(
+                    f"Error fetching the trading fee for {trading_pair} from Binance.", exc_info=result,
+                    app_warning_msg=f"Could not fetch the real trading fee for {trading_pair}; "
+                                    "using the default fee schema instead.")
+                continue
+            maker = Decimal(str(result["makerCommissionRate"]))
+            taker = Decimal(str(result["takerCommissionRate"]))
+            rates[trading_pair] = MakerTakerExchangeFeeRates(
+                maker=maker, taker=taker, maker_flat_fees=[], taker_flat_fees=[])
+            self.logger().info(f"Binance trade fee for {trading_pair}: maker={maker} taker={taker}")
+
+        self._trading_fees = rates
+        TradeFeeRegistry.set_rates(self.name, rates)
 
     async def _status_polling_loop_fetch_updates(self):
         await safe_gather(

@@ -9,7 +9,9 @@ import pandas as pd
 import yaml
 
 from kairos.client import settings
+from kairos.connector.utils import split_hb_trading_pair
 from kairos.core.data_type.common import LazyDict, TradeType
+from kairos.core.utils.estimate_fee import resolve_fee_percent
 from kairos.data_feed.candles_feed.data_types import CandlesConfig
 from kairos.exceptions import InvalidController
 from kairos.strategy_v2.backtesting.backtesting_data_provider import BacktestingDataProvider
@@ -19,19 +21,71 @@ from kairos.strategy_v2.backtesting.executors_simulator.grid_executor_simulator 
 from kairos.strategy_v2.backtesting.executors_simulator.order_executor_simulator import OrderExecutorSimulator
 from kairos.strategy_v2.backtesting.executors_simulator.position_executor_simulator import PositionExecutorSimulator
 from kairos.strategy_v2.controllers.controller_base import ControllerBase, ControllerConfigBase
-from kairos.strategy_v2.controllers.directional_trading_controller_base import (
-    DirectionalTradingControllerConfigBase,
-)
+from kairos.strategy_v2.controllers.directional_trading_controller_base import DirectionalTradingControllerConfigBase
 from kairos.strategy_v2.controllers.market_making_controller_base import MarketMakingControllerConfigBase
 from kairos.strategy_v2.executors.data_types import PositionSummary
 from kairos.strategy_v2.executors.dca_executor.data_types import DCAExecutorConfig
 from kairos.strategy_v2.executors.grid_executor.data_types import GridExecutorConfig
-from kairos.strategy_v2.executors.order_executor.data_types import OrderExecutorConfig
+from kairos.strategy_v2.executors.order_executor.data_types import ExecutionStrategy, OrderExecutorConfig
 from kairos.strategy_v2.executors.position_executor.data_types import PositionExecutorConfig
 from kairos.strategy_v2.models.base import RunnableStatus
 from kairos.strategy_v2.models.executor_actions import CreateExecutorAction, StopExecutorAction
 from kairos.strategy_v2.models.executors import CloseType
 from kairos.strategy_v2.models.executors_info import ExecutorInfo
+
+# Fallback when a config's connector isn't a recognized exchange (e.g. a test double) — keeps the
+# old flat assumption alive as a last resort rather than raising out of a backtest run.
+_DEFAULT_TRADE_COST = 0.0002
+
+
+def _resolve_backtesting_trade_cost(
+        config: Union[PositionExecutorConfig, DCAExecutorConfig, GridExecutorConfig, OrderExecutorConfig]) -> float:
+    """Best-effort maker/taker- and pair-aware trade cost for `config`, replacing the old flat
+    0.0002 default. Mirrors the existing per-simulator formulas exactly (they all treat this value
+    as "cost per leg", doubling it for a round trip) — only *how* the number is derived changes.
+
+    Uses the connector's real per-pair rate when `_update_trading_fees()` has already populated
+    `TradeFeeRegistry` for this connector+pair (see kairos/core/data_type/trade_fee_registry.py);
+    otherwise falls back to the connector's static default schema (or a manual override in
+    conf_fee_overrides.yml, which always wins over both — see `resolve_fee_percent`).
+    """
+    try:
+        base_currency, quote_currency = split_hb_trading_pair(config.trading_pair)
+        maker_rate = float(resolve_fee_percent(config.connector_name, True, base_currency, quote_currency))
+        taker_rate = float(resolve_fee_percent(config.connector_name, False, base_currency, quote_currency))
+    except Exception:
+        return _DEFAULT_TRADE_COST
+
+    if isinstance(config, OrderExecutorConfig):
+        # Single-sided (no round trip): the execution strategy tells us directly which side applies.
+        if config.execution_strategy == ExecutionStrategy.LIMIT_MAKER:
+            return maker_rate
+        if config.execution_strategy in (ExecutionStrategy.MARKET, ExecutionStrategy.LIMIT_CHASER):
+            return taker_rate
+        return maker_rate  # plain LIMIT: a resting order, filled passively
+
+    if isinstance(config, GridExecutorConfig):
+        # Grid has an explicit order type for both legs (on its triple_barrier_config, same shape
+        # as PositionExecutorConfig's — GridLevel has its own open/take_profit_order_type fields
+        # too, but those describe per-level runtime state, not the config) — no guessing needed.
+        entry_rate = maker_rate if config.triple_barrier_config.open_order_type.is_limit_type() else taker_rate
+        exit_rate = maker_rate if config.triple_barrier_config.take_profit_order_type.is_limit_type() else taker_rate
+        return (entry_rate + exit_rate) / 2
+
+    if isinstance(config, PositionExecutorConfig):
+        # Entry type is known upfront; which barrier closes the position isn't (that's exactly
+        # what this cost feeds into), so the exit leg can't be resolved without circularity. All
+        # three configurable exit order types (take_profit/stop_loss/time_limit) default to
+        # MARKET, so the taker rate is used as the exit-leg proxy rather than guessing a barrier.
+        entry_rate = maker_rate if config.triple_barrier_config.open_order_type.is_limit_type() else taker_rate
+        return (entry_rate + taker_rate) / 2
+
+    if isinstance(config, DCAExecutorConfig):
+        # DCAExecutorSimulator only supports DCAMode.MAKER (TAKER mode raises NotImplementedError),
+        # so the entry leg is always maker; the exit leg has the same ambiguity as PositionExecutor.
+        return (maker_rate + taker_rate) / 2
+
+    return (maker_rate + taker_rate) / 2
 
 
 class BacktestPositionHold:
@@ -206,7 +260,7 @@ class BacktestingEngineBase:
                               controller_config: ControllerConfigBase,
                               start: int, end: int,
                               backtesting_resolution: str = "1m",
-                              trade_cost=0.0002):
+                              trade_cost: Optional[float] = None):
         # Generate unique ID if not set to avoid race conditions
         if not controller_config.id or controller_config.id.strip() == "":
             from kairos.strategy_v2.utils.common import generate_unique_id
@@ -250,12 +304,14 @@ class BacktestingEngineBase:
         for config in self.controller.get_candles_config():
             await self.controller.market_data_provider.initialize_candles_feed(config)
 
-    async def simulate_execution(self, trade_cost: float) -> list:
+    async def simulate_execution(self, trade_cost: Optional[float] = None) -> list:
         """
         Simulates market making strategy over historical data, considering trading costs.
 
         Args:
-            trade_cost (float): The cost per trade.
+            trade_cost (Optional[float]): The cost per trade. When omitted, each executor resolves
+                its own maker/taker-aware, per-pair cost (see `_resolve_backtesting_trade_cost`);
+                pass an explicit value to force the same flat cost for every executor, as before.
 
         Returns:
             List[ExecutorInfo]: List of executor information objects detailing the simulation results.
@@ -403,18 +459,22 @@ class BacktestingEngineBase:
 
     def simulate_executor(self, config: Union[PositionExecutorConfig, DCAExecutorConfig, GridExecutorConfig, OrderExecutorConfig],
                           df: pd.DataFrame,
-                          trade_cost: float) -> Optional[ExecutorSimulation]:
+                          trade_cost: Optional[float] = None) -> Optional[ExecutorSimulation]:
         """
         Simulates the execution of a trading strategy given a configuration.
 
         Args:
             config (Union[PositionExecutorConfig, DCAExecutorConfig, GridExecutorConfig, OrderExecutorConfig]): The configuration of the executor.
             df (pd.DataFrame): DataFrame containing the market data from the start time.
-            trade_cost (float): The cost per trade.
+            trade_cost (Optional[float]): The cost per trade. When omitted, resolved from the
+                connector's real (or default) maker/taker fees for this config's pair and order
+                type(s) — see `_resolve_backtesting_trade_cost`.
 
         Returns:
             ExecutorSimulation: The results of the simulation.
         """
+        if trade_cost is None:
+            trade_cost = _resolve_backtesting_trade_cost(config)
         if isinstance(config, DCAExecutorConfig):
             return self.dca_executor_simulator.simulate(df, config, trade_cost)
         elif isinstance(config, PositionExecutorConfig):

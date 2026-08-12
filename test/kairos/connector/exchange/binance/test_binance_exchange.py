@@ -15,7 +15,13 @@ from kairos.connector.trading_rule import TradingRule
 from kairos.connector.utils import get_new_client_order_id
 from kairos.core.data_type.common import OrderType, TradeType
 from kairos.core.data_type.in_flight_order import InFlightOrder, OrderState
-from kairos.core.data_type.trade_fee import DeductedFromReturnsTradeFee, TokenAmount, TradeFeeBase
+from kairos.core.data_type.trade_fee import (
+    DeductedFromReturnsTradeFee,
+    MakerTakerExchangeFeeRates,
+    TokenAmount,
+    TradeFeeBase,
+)
+from kairos.core.data_type.trade_fee_registry import TradeFeeRegistry
 from kairos.core.event.events import MarketOrderFailureEvent, OrderFilledEvent
 
 
@@ -858,6 +864,72 @@ class BinanceExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests
         request_params = request.kwargs["params"]
         self.assertEqual(self.exchange_symbol_for_tokens(self.base_asset, self.quote_asset), request_params["symbol"])
         self.assertEqual(10 * 1e3, request_params["startTime"])
+
+    @aioresponses()
+    def test_update_trading_fees(self, mock_api):
+        self.addCleanup(TradeFeeRegistry.clear)
+        url = web_utils.sapi_rest_url(CONSTANTS.TRADE_FEE_PATH_URL, domain=self.exchange._domain)
+        regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
+        symbol = self.exchange_symbol_for_tokens(self.base_asset, self.quote_asset)
+        mock_response = [
+            {"symbol": symbol, "makerCommission": "0", "takerCommission": "0.001"},
+            # A symbol this connector isn't configured to trade must be ignored, not error out.
+            {"symbol": "SOMEOTHERPAIR", "makerCommission": "0.002", "takerCommission": "0.002"},
+        ]
+        mock_api.get(regex_url, body=json.dumps(mock_response))
+
+        self.async_run_with_timeout(self.exchange._update_trading_fees())
+
+        request = self._all_executed_requests(mock_api, url)[0]
+        self.validate_auth_credentials_present(request)
+
+        rates = self.exchange._trading_fees[self.trading_pair]
+        self.assertEqual(Decimal("0"), rates.maker)
+        self.assertEqual(Decimal("0.001"), rates.taker)
+        self.assertNotIn("SOMEOTHERPAIR", self.exchange._trading_fees)
+
+        registry_rates = TradeFeeRegistry.rates_for("binance", self.trading_pair)
+        self.assertEqual(Decimal("0"), registry_rates.maker)
+        self.assertEqual(Decimal("0.001"), registry_rates.taker)
+
+    @aioresponses()
+    def test_update_trading_fees_network_error_does_not_raise(self, mock_api):
+        self.addCleanup(TradeFeeRegistry.clear)
+        url = web_utils.sapi_rest_url(CONSTANTS.TRADE_FEE_PATH_URL, domain=self.exchange._domain)
+        regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
+        mock_api.get(regex_url, exception=IOError("network error"))
+
+        self.async_run_with_timeout(self.exchange._update_trading_fees())  # must not raise
+
+        self.assertEqual({}, self.exchange._trading_fees)
+        self.assertIsNone(TradeFeeRegistry.rates_for("binance", self.trading_pair))
+
+    def test_get_fee_limit_order_uses_maker_rate(self):
+        self.addCleanup(TradeFeeRegistry.clear)
+        TradeFeeRegistry.set_rates("binance", {
+            self.trading_pair: MakerTakerExchangeFeeRates(
+                maker=Decimal("0"), taker=Decimal("0.001"), maker_flat_fees=[], taker_flat_fees=[]),
+        })
+
+        # A plain LIMIT order is a passive/resting order — it should price as maker, not taker.
+        fee = self.exchange._get_fee(
+            base_currency=self.base_asset, quote_currency=self.quote_asset,
+            order_type=OrderType.LIMIT, order_side=TradeType.BUY,
+            amount=Decimal("1"), price=Decimal("100"))
+        self.assertEqual(Decimal("0"), fee.percent)
+
+        fee = self.exchange._get_fee(
+            base_currency=self.base_asset, quote_currency=self.quote_asset,
+            order_type=OrderType.MARKET, order_side=TradeType.BUY,
+            amount=Decimal("1"), price=Decimal("100"))
+        self.assertEqual(Decimal("0.001"), fee.percent)
+
+        # An explicit is_maker from the caller is respected regardless of order_type.
+        fee = self.exchange._get_fee(
+            base_currency=self.base_asset, quote_currency=self.quote_asset,
+            order_type=OrderType.MARKET, order_side=TradeType.BUY,
+            amount=Decimal("1"), price=Decimal("100"), is_maker=True)
+        self.assertEqual(Decimal("0"), fee.percent)
 
     @aioresponses()
     def test_update_order_fills_from_trades_with_repeated_fill_triggers_only_one_event(self, mock_api):

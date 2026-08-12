@@ -23,7 +23,8 @@ from kairos.connector.utils import get_new_client_order_id
 from kairos.core.data_type.common import OrderType, PositionAction, PositionMode, TradeType
 from kairos.core.data_type.in_flight_order import InFlightOrder, OrderState
 from kairos.core.data_type.limit_order import LimitOrder
-from kairos.core.data_type.trade_fee import TokenAmount
+from kairos.core.data_type.trade_fee import MakerTakerExchangeFeeRates, TokenAmount
+from kairos.core.data_type.trade_fee_registry import TradeFeeRegistry
 from kairos.core.event.event_logger import EventLogger
 from kairos.core.event.events import MarketEvent, OrderFilledEvent
 
@@ -2353,6 +2354,64 @@ class BinancePerpetualDerivativeUnitTest(IsolatedAsyncioWrapperTestCase):
                                 if key[1].human_repr().startswith(url)))
         request_params = account_request[1][0].kwargs["params"]
         self.assertIsInstance(request_params["timestamp"], int)
+
+    @aioresponses()
+    async def test_update_trading_fees(self, req_mock):
+        self.addCleanup(TradeFeeRegistry.clear)
+        self.exchange._set_trading_pair_symbol_map(bidict({self.symbol: self.trading_pair}))
+        url = web_utils.private_rest_url(path_url=CONSTANTS.COMMISSION_RATE_URL, domain=self.domain)
+        regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
+        response = {"symbol": self.symbol, "makerCommissionRate": "0.0002", "takerCommissionRate": "0.0004"}
+        req_mock.get(regex_url, body=json.dumps(response))
+
+        await self.exchange._update_trading_fees()
+
+        request = next(((key, value) for key, value in req_mock.requests.items()
+                        if key[1].human_repr().startswith(url)))
+        request_params = request[1][0].kwargs["params"]
+        self.assertEqual(self.symbol, request_params["symbol"])
+
+        rates = self.exchange._trading_fees[self.trading_pair]
+        self.assertEqual(Decimal("0.0002"), rates.maker)
+        self.assertEqual(Decimal("0.0004"), rates.taker)
+
+        registry_rates = TradeFeeRegistry.rates_for(CONSTANTS.EXCHANGE_NAME, self.trading_pair)
+        self.assertEqual(Decimal("0.0002"), registry_rates.maker)
+        self.assertEqual(Decimal("0.0004"), registry_rates.taker)
+
+    @aioresponses()
+    async def test_update_trading_fees_network_error_does_not_raise(self, req_mock):
+        self.addCleanup(TradeFeeRegistry.clear)
+        self.exchange._set_trading_pair_symbol_map(bidict({self.symbol: self.trading_pair}))
+        url = web_utils.private_rest_url(path_url=CONSTANTS.COMMISSION_RATE_URL, domain=self.domain)
+        regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
+        req_mock.get(regex_url, exception=IOError("network error"))
+
+        await self.exchange._update_trading_fees()  # must not raise
+
+        self.assertEqual({}, self.exchange._trading_fees)
+        self.assertIsNone(TradeFeeRegistry.rates_for(CONSTANTS.EXCHANGE_NAME, self.trading_pair))
+
+    async def test_get_fee_limit_order_uses_maker_rate(self):
+        self.addCleanup(TradeFeeRegistry.clear)
+        TradeFeeRegistry.set_rates(CONSTANTS.EXCHANGE_NAME, {
+            self.trading_pair: MakerTakerExchangeFeeRates(
+                maker=Decimal("0.0002"), taker=Decimal("0.0004"), maker_flat_fees=[], taker_flat_fees=[]),
+        })
+
+        # A plain LIMIT order is a passive/resting order — it should price as maker, not taker
+        # (previously this connector always defaulted to taker unless is_maker was passed True).
+        fee = self.exchange._get_fee(
+            base_currency=self.base_asset, quote_currency=self.quote_asset,
+            order_type=OrderType.LIMIT, order_side=TradeType.BUY,
+            position_action=PositionAction.OPEN, amount=Decimal("1"), price=Decimal("10000"))
+        self.assertEqual(Decimal("0.0002"), fee.percent)
+
+        fee = self.exchange._get_fee(
+            base_currency=self.base_asset, quote_currency=self.quote_asset,
+            order_type=OrderType.MARKET, order_side=TradeType.BUY,
+            position_action=PositionAction.OPEN, amount=Decimal("1"), price=Decimal("10000"))
+        self.assertEqual(Decimal("0.0004"), fee.percent)
 
     async def test_limit_orders(self):
         self.exchange.start_tracking_order(
