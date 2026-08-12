@@ -153,6 +153,92 @@ be a creatable strategy name, with every required field supplied via `--set` / `
 
 ---
 
+## Strategy examples
+
+Every `create`/`deploy` command below is a complete, ready-to-run config (no leftover
+`required_remaining` fields) — copy one as-is or swap in your own `market`/`trading_pair`. Amounts
+are kept deliberately tiny; scale them up once you've watched a config run and are happy with it.
+Two are shown against `binance_paper_trade` since that's what they default to and there's no reason
+to risk funds while trying the shape of a config out; swap `exchange`/`connector_name` for `binance`
+(spot, no leverage) to run for real. `pmm_dynamic` and `dman_maker_v2` default to
+`binance_perpetual` with 20x leverage — halve or zero that before running either live.
+
+**`pure_market_making`** (V1 strategy, `conf/strategies/`) — the classic single-pair market maker.
+Not live-tunable; changing a spread means editing the file and restarting.
+
+```bash
+hbot create pure_market_making --name conf_pmm.yml \
+    --set exchange=binance --set market=BTC-USDT \
+    --set bid_spread=0.5 --set ask_spread=0.5 \
+    --set order_refresh_time=30 --set order_amount=0.0001
+hbot start
+```
+
+**`avellaneda_market_making`** (V1 strategy) — Avellaneda–Stoikov inventory-risk model instead of
+fixed spreads. `execution_timeframe_mode=infinite` runs until stopped; the alternative is a
+date-bounded or daily-time-window run (see `avellaneda_market_making_config_map_pydantic.py` for
+the other two modes' fields).
+
+```bash
+hbot create avellaneda_market_making --name conf_avellaneda.yml \
+    --set exchange=binance --set market=BTC-USDT \
+    --set execution_timeframe_mode=infinite \
+    --set order_amount=0.0001 --set order_refresh_time=30
+hbot start
+```
+
+**`pmm_simple`** (V2 controller, `controllers/market_making/`) — fixed spreads on the V2 executor
+framework. Fields are live-tunable (`hbot config buy_spreads 0.01,0.02`, ~10s to apply) without a
+restart.
+
+```bash
+hbot deploy pmm_simple \
+    --set connector_name=binance_paper_trade --set trading_pair=BTC-USDT \
+    --set total_amount_quote=100 --set buy_spreads=0.01,0.02 --set sell_spreads=0.01,0.02
+```
+
+**`pmm_dynamic`** (V2 controller) — spreads widen/narrow with NATR volatility and a MACD-signaled
+price shift, instead of staying fixed. Reads candles from the same pair by default
+(`candles_connector`/`candles_trading_pair` left blank).
+
+```bash
+hbot deploy pmm_dynamic \
+    --set connector_name=binance_perpetual --set trading_pair=BTC-USDT \
+    --set total_amount_quote=100 --set leverage=1
+```
+
+**`dman_maker_v2`** (V2 controller) — market-making quotes plus a DCA ladder (`dca_spreads`/
+`dca_amounts`) that averages into a position as price moves against it.
+
+```bash
+hbot deploy dman_maker_v2 \
+    --set connector_name=binance_perpetual --set trading_pair=BTC-USDT \
+    --set total_amount_quote=100 --set leverage=1
+```
+
+**`pmm_v1`** (V2 controller, `controllers/generic/`) — the legacy `pure_market_making` algorithm
+(multi-level spreads, inventory skew, price bands) re-hosted on the V2 executor framework, so it
+gets live-tunable fields and backtesting where the V1 strategy has neither.
+
+```bash
+hbot deploy pmm_v1 \
+    --set connector_name=binance --set trading_pair=BTC-USDT \
+    --set order_amount=0.0001 --set buy_spreads=0.01 --set sell_spreads=0.01
+```
+
+**`simple_pmm`** (V2 script, `conf/scripts/`) — the smallest possible market maker, one file, no
+controller indirection. This is what `conf_fdusd_paper.yml` in the walkthrough above actually runs.
+
+```bash
+hbot create simple_pmm --name conf_simple.yml \
+    --set exchange=binance_paper_trade --set trading_pair=BTC-FDUSD \
+    --set order_amount=0.001 --set bid_spread=0.001 --set ask_spread=0.001 \
+    --set order_refresh_time=15
+hbot start
+```
+
+---
+
 ## Running & observing
 
 - **One bot per install.** `start` fails if one is already running; pass `--replace` to stop it
