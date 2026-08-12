@@ -3,7 +3,7 @@ import time
 from decimal import Decimal
 from pathlib import Path
 from test.isolated_asyncio_wrapper_test_case import IsolatedAsyncioWrapperTestCase
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 from pydantic import Field
 from sqlalchemy.orm import Session
@@ -200,7 +200,9 @@ class TradingCoreTest(IsolatedAsyncioWrapperTestCase):
         )
 
     @patch("hummingbot.core.trading_core.importlib")
-    @patch("hummingbot.core.trading_core.inspect")
+    # new_callable is required: patch() picks AsyncMock for the `inspect` module on Python
+    # 3.12, so inspect.getmembers() would return a coroutine instead of the list set below.
+    @patch("hummingbot.core.trading_core.inspect", new_callable=MagicMock)
     @patch("hummingbot.core.trading_core.sys")
     def test_load_script_class(self, mock_sys, mock_inspect, mock_importlib):
         """Test loading script strategy class"""

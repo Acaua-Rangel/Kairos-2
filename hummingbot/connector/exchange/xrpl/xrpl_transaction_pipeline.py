@@ -252,7 +252,17 @@ class XRPLTransactionPipeline:
                     self._submissions_failed += 1
 
                     if not future.done():
-                        future.set_exception(e)
+                        # Drop this loop's own frame from the traceback before handing the
+                        # exception to the caller. The traceback keeps the frame ALIVE, and
+                        # this one belongs to a coroutine that is still suspended and running.
+                        # Anything that walks the caller's traceback and calls frame.clear()
+                        # — unittest's assertRaises does, via traceback.clear_frames() — would
+                        # otherwise finalize this loop mid-flight, after which awaiting the
+                        # pipeline task raises "cannot reuse already awaited coroutine".
+                        # tb_next keeps the submitted coroutine's own frames, which are the
+                        # useful ones for debugging.
+                        tb = e.__traceback__
+                        future.set_exception(e.with_traceback(tb.tb_next) if tb is not None else e)
 
                     self.logger().error(
                         f"[PIPELINE] Submission {submission_id} failed after {elapsed_ms:.1f}ms: {e}"
