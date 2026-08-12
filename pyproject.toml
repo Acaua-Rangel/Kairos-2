@@ -1,6 +1,6 @@
 [project]
 name = "kairos-2"
-version = "0.2.0"
+version = "0.2.1"
 description = "Kairos-2 - Binance market making client"
 readme = "README.md"
 license = "Apache-2.0"
